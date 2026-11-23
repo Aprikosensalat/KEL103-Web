@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KEL103 Steuerung</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header>
+    <h1>KEL103 Steuerung</h1>
+    <div class="conn">
+      <label>Baudrate
+        <select id="baud">
+          <option>9600</option>
+          <option>19200</option>
+          <option>38400</option>
+          <option>57600</option>
+          <option selected>115200</option>
+        </select>
+      </label>
+      <button id="btnConnect" class="primary">Verbinden</button>
+      <span id="status" class="status off">getrennt</span>
+    </div>
+  </header>
+
+  <p id="unsupported" class="banner" hidden>
+    Dieser Browser unterstützt die Web Serial API nicht. Bitte Chrome oder Edge (Desktop) verwenden
+    und die Seite über <code>http://localhost</code> oder <code>https://</code> öffnen.
+  </p>
+
+  <main>
+    <section class="card" id="idnCard">
+      <h2>Gerät</h2>
+      <p id="idn" class="muted">—</p>
+    </section>
+
+    <section class="meters">
+      <div class="card meter">
+        <span class="label">Spannung</span>
+        <span class="value"><span id="mV">—</span> <small>V</small></span>
+      </div>
+      <div class="card meter">
+        <span class="label">Strom</span>
+        <span class="value"><span id="mI">—</span> <small>A</small></span>
+      </div>
+      <div class="card meter">
+        <span class="label">Leistung</span>
+        <span class="value"><span id="mP">—</span> <small>W</small></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Verlauf</h2>
+        <div class="row tight">
+          <label class="check"><input type="checkbox" data-series="v" checked> Spannung</label>
+          <label class="check"><input type="checkbox" data-series="i" checked> Strom</label>
+          <label class="check"><input type="checkbox" data-series="p" checked> Leistung</label>
+          <select id="window" aria-label="Zeitfenster">
+            <option value="60000">1 min</option>
+            <option value="300000" selected>5 min</option>
+            <option value="900000">15 min</option>
+            <option value="3600000">1 h</option>
+            <option value="0">alles</option>
+          </select>
+        </div>
+      </div>
+      <canvas id="plot"></canvas>
+    </section>
+
+    <section class="card controls">
+      <h2>Steuerung</h2>
+      <div class="row">
+        <button id="btnInput" class="input-btn" disabled>Eingang EIN</button>
+        <span id="inputState" class="status off">Eingang aus</span>
+      </div>
+      <div class="row">
+        <label>Modus
+          <select id="mode" disabled></select>
+        </label>
+        <label>Sollwert
+          <span class="with-unit">
+            <input id="setpoint" type="number" min="0" step="0.001" value="0" disabled>
+            <span id="unit">A</span>
+          </span>
+        </label>
+        <button id="btnApply" disabled>Übernehmen</button>
+      </div>
+      <p class="muted small">Aktueller Sollwert im Gerät: <span id="curSet">—</span></p>
+      <label class="check"><input type="checkbox" id="offOnDisconnect" checked> Eingang beim Trennen ausschalten</label>
+    </section>
+
+    <section class="card" id="dynCard">
+      <h2>Dynamik</h2>
+      <p class="muted small">
+        Die Last wechselt selbstständig zwischen zwei Werten (CV/CC/CR/CW mit Frequenz und Tastgrad)
+        oder schaltet per Trigger (Puls, Toggle). Der Tastgrad ist der Zeitanteil von Wert 2.
+        Die Last liefert nur etwa alle 200 ms einen neuen Messwert – schnellere Wechsel erscheinen
+        im Verlauf als Mittelwert.
+      </p>
+      <div class="row">
+        <label>Modus
+          <select id="dynMode"></select>
+        </label>
+        <label><span id="dynL1">Wert 1</span>
+          <input id="dynV1" type="number" min="0" step="0.001" value="0.2">
+        </label>
+        <label><span id="dynL2">Wert 2</span>
+          <input id="dynV2" type="number" min="0" step="0.001" value="0.6">
+        </label>
+        <label data-dyn="freq">Frequenz (Hz)
+          <input id="dynFreq" type="number" min="0.001" max="10000" step="0.001" value="1">
+        </label>
+        <label data-dyn="freq">Tastgrad Wert 2 (%)
+          <input id="dynDuty" type="number" min="1" max="99" step="1" value="50">
+        </label>
+        <label data-dyn="width">Pulsbreite (s)
+          <input id="dynWidth" type="number" min="0.001" max="100" step="0.001" value="0.5">
+        </label>
+        <label data-dyn="slopes">Anstieg 1 (A/µs)
+          <input id="dynS1" type="number" min="0.001" max="1" step="0.001" value="0.1">
+        </label>
+        <label data-dyn="slopes">Anstieg 2 (A/µs)
+          <input id="dynS2" type="number" min="0.001" max="1" step="0.001" value="0.1">
+        </label>
+      </div>
+      <div class="row">
+        <button id="btnDynStart" class="primary" disabled>Übernehmen &amp; Eingang EIN</button>
+        <button id="btnDynApply" disabled>Nur übernehmen</button>
+        <button id="btnDynStop" disabled>Eingang AUS</button>
+        <button id="btnDynTrig" disabled>Trigger auslösen</button>
+        <button id="btnDynRead" disabled>Vom Gerät lesen</button>
+      </div>
+      <p id="dynMsg" class="muted small"></p>
+    </section>
+
+    <section class="card" id="battCard">
+      <div class="card-head">
+        <h2>Entladetest (interne Batterietest-Funktion)</h2>
+        <span id="battState" class="status off">bereit</span>
+      </div>
+      <p class="muted small">
+        Die Last entlädt mit Konstantstrom und schaltet selbst ab, sobald die Schlussspannung,
+        die Kapazitätsgrenze oder das Zeitlimit erreicht ist – auch wenn der Browser geschlossen wird
+        (dazu oben den Haken „Eingang beim Trennen ausschalten“ entfernen).
+        Beim Wiederverbinden wird ein laufender Test erkannt.
+      </p>
+      <div class="row">
+        <label>Speicherplatz
+          <select id="battSlot"></select>
+        </label>
+        <button id="btnBattLoad" disabled>Platz laden</button>
+      </div>
+      <div class="row">
+        <label>Entladestrom (A)
+          <input id="battCurrent" type="number" min="0.001" max="30" step="0.001" value="1">
+        </label>
+        <label>Schlussspannung (V)
+          <input id="battCutoff" type="number" min="0" max="120" step="0.01" value="3.0">
+        </label>
+        <label>Kapazitätsgrenze (Ah)
+          <input id="battCapacity" type="number" min="0.001" step="0.001" value="10">
+        </label>
+        <label>Zeitlimit (min)
+          <input id="battMinutes" type="number" min="0.1" step="0.1" value="600">
+        </label>
+      </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" id="battClear" checked> Verlauf beim Start löschen</label>
+        <button id="btnBattStart" class="primary" disabled>Test starten</button>
+        <button id="btnBattStop" disabled>Test stoppen</button>
+      </div>
+      <p id="battMsg" class="muted small"></p>
+      <div class="stats">
+        <div><span class="label">Kapazität</span><span id="bCap" class="stat">—</span></div>
+        <div><span class="label">Energie</span><span id="bEnergy" class="stat">—</span></div>
+        <div><span class="label">Dauer</span><span id="bTime" class="stat">—</span></div>
+        <div><span class="label">Spannung Start / Ende</span><span id="bVolt" class="stat">—</span></div>
+        <div><span class="label">Mittlere Spannung</span><span id="bVavg" class="stat">—</span></div>
+      </div>
+    </section>
+
+    <section class="card" id="riCard">
+      <h2>Innenwiderstand</h2>
+      <p class="muted small">
+        Misst zuerst die Leerlaufspannung, belastet die Batterie dann nacheinander kurz mit den
+        angegebenen Strömen (Konstantstrom) und wertet den Spannungseinbruch aus.
+        Ri ergibt sich aus der Steigung der Ausgleichsgeraden durch alle Punkte (U über I).
+        Für genaue Werte die Batterie mit kurzen, dicken Leitungen anschließen –
+        der Widerstand der Messleitungen wird mitgemessen.
+      </p>
+      <div class="row">
+        <label>Prüfströme (A)
+          <input id="riCurrents" type="text" value="0,5; 1; 2" class="wide">
+        </label>
+        <label>Pulsdauer (s)
+          <input id="riPulse" type="number" min="0.5" step="0.5" value="2">
+        </label>
+        <label>Pause (s)
+          <input id="riPause" type="number" min="0.5" step="0.5" value="3">
+        </label>
+        <label>Abbruch unter (V)
+          <input id="riVmin" type="number" min="0" step="0.1" value="2.5">
+        </label>
+        <button id="btnRi" disabled>Messung starten</button>
+      </div>
+      <p id="riStatus" class="muted small"></p>
+      <div class="ri-grid">
+        <div>
+          <table id="riTable">
+            <thead>
+              <tr><th>Soll</th><th>I gemessen</th><th>U</th><th>ΔU</th><th>Ri (Punkt)</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p id="riResult" class="result"></p>
+        </div>
+        <canvas id="riPlot"></canvas>
+      </div>
+    </section>
+
+    <section class="card logging">
+      <h2>Aufzeichnung</h2>
+      <div class="row">
+        <label>Intervall
+          <select id="interval">
+            <option value="250">250 ms</option>
+            <option value="500" selected>500 ms</option>
+            <option value="1000">1 s</option>
+            <option value="2000">2 s</option>
+            <option value="5000">5 s</option>
+            <option value="10000">10 s</option>
+            <option value="30000">30 s</option>
+          </select>
+        </label>
+        <button id="btnPoll" disabled>Pause</button>
+        <button id="btnCsv">CSV exportieren</button>
+        <button id="btnClear">Verlauf löschen</button>
+      </div>
+      <p class="muted small"><span id="samples">0</span> Messwerte aufgezeichnet · Energie <span id="energy">0.000</span> Wh · Ladung <span id="charge">0.000</span> Ah</p>
+    </section>
+
+    <section class="card console">
+      <h2>Konsole</h2>
+      <form id="consoleForm" class="row">
+        <input id="cmd" type="text" placeholder="z. B. *IDN? oder :MEAS:VOLT?" autocomplete="off" disabled>
+        <button id="btnSend" disabled>Senden</button>
+      </form>
+      <pre id="log"></pre>
+    </section>
+  </main>
+</body>
+</html>
