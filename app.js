@@ -1,9 +1,12 @@
 import { KEL103, MODES, DYN_MODES, DYN_LIMITS } from './kel103.js';
 import { TimePlot, drawXY } from './plot.js';
+import { RunStore, Recorder, runToCsv, fileName, makeZip } from './runs.js';
 
 const $ = (id) => document.getElementById(id);
 const load = new KEL103();
-
+const store = new RunStore();
+const storeOpened = store.open(); // sofort öffnen; Schreibzugriffe warten darauf
+const rec = new Recorder(store, () => scheduleFilesRefresh());
 const MAX_HISTORY = 500_000;
 
 const state = {
@@ -119,7 +122,13 @@ function updateControls() {
 }
 
 function setInputUI(on) {
+  const was = state.inputOn;
   state.inputOn = on;
+  if (!on && rec.run?.endOnInputOff) rec.end('Eingang aus');
+  // Eingang ohne laufenden Test eingeschaltet (Knopf oder am Gerät) -> eigene Datei „Manuell“
+  if (on && !was && !rec.active && !state.busy && !battRunning() && !listRunning() && load.connected) {
+    rec.start('manual', `Manuell – ${modeText()}`, { endOnInputOff: true, params: { Betriebsart: modeText() } });
+  }
   const btn = $('btnInput');
   btn.textContent = on ? 'Eingang AUS' : 'Eingang EIN';
   btn.classList.toggle('is-on', on);
@@ -129,6 +138,13 @@ function setInputUI(on) {
 }
 
 const SPECIAL_MODES = { BATTERY: 'Batterietest (intern)', DYNAMIC: 'Dynamik', LIST: 'Sequenz', SHORT: 'Kurzschluss' };
+
+function modeText() {
+  const m = MODES[state.mode];
+  if (!m) return SPECIAL_MODES[state.mode] ?? state.mode;
+  const set = $('curSet').textContent;
+  return set && set !== '—' ? `${state.mode} ${set}` : state.mode;
+}
 
 function setModeUI(mode) {
   state.mode = mode;
@@ -174,16 +190,19 @@ async function connect() {
     return;
   }
   log('info', 'Port geöffnet');
+  // Bedienung sperren, bis der Gerätezustand eingelesen ist (sonst können veraltete Werte Klicks überschreiben)
+  state.busy = 'connect';
   updateControls();
   try {
     $('idn').textContent = await load.identify();
     const on = await load.getInput();
-    setInputUI(on);
     const mode = await load.getMode();
     setModeUI(mode);
     await refreshSetpoint();
+    // laufende Abläufe erkennen, bevor der Eingangsstatus eine „Manuell“-Datei anlegt
     if (mode === 'BATTERY' && on) await attachRunningBattery();
     if (mode === 'LIST' && on) attachRunningList();
+    setInputUI(on);
     if (mode === 'DYNAMIC') await readDynamic();
   } catch (e) {
     log('err', `${e.message} – richtiger Port gewählt? Bei RS232 muss die Baudrate passen (am Gerät: Shift + 0).`);
@@ -193,6 +212,8 @@ async function connect() {
   } catch (e) {
     log('err', `Systemwerte nicht lesbar: ${e.message}`);
   }
+  state.busy = null;
+  updateControls();
   schedulePoll(0);
 }
 
@@ -220,6 +241,7 @@ load.onDisconnect = () => {
     setListState('getrennt', 'fail');
     listMsg(`Verbindung getrennt – ${kept}`);
   }
+  rec.end('Verbindung getrennt');
   updateControls();
   log('info', 'Port geschlossen');
 };
@@ -242,6 +264,7 @@ $('mode').addEventListener('change', async () => {
   const mode = $('mode').value;
   try {
     await load.setMode(mode);
+    rec.event(`Betriebsart ${mode}`);
     setModeUI(mode);
     await refreshSetpoint();
   } catch (e) {
@@ -261,6 +284,7 @@ async function applySetpoint() {
   const value = Number($('setpoint').value);
   try {
     await load.setSetpoint(state.mode, value);
+    rec.event(`Sollwert ${value} ${MODES[state.mode]?.unit ?? ''}`.trim());
     await refreshSetpoint();
   } catch (e) {
     log('err', e.message);
@@ -284,15 +308,20 @@ async function poll() {
   if (state.busy) return schedulePoll();
   const started = performance.now();
   try {
-    const m = await load.measure();
-    addSample(m);
+    // Leistung aus U·I: passt in jeder Zeile zu Spannung und Strom (und spart eine Abfrage)
+    const m = await load.measureVI();
     if (battRunning()) {
-      await updateBattery(m);
-    } else if (listRunning()) {
-      await updateList();
-    } else if (state.cycle++ % 5 === 0) {
-      // Eingangsstatus gelegentlich nachlesen (könnte am Gerät umgeschaltet worden sein)
-      setInputUI(await load.getInput());
+      const info = await readBatteryInfo();
+      addSample(m, { kapazitaet_mAh: info.cap * 1000, testzeit_min: info.minutes });
+      processBattery(m, info);
+    } else {
+      addSample(m);
+      if (listRunning()) {
+        await updateList();
+      } else if (state.cycle++ % 5 === 0 || rec.active) {
+        // Eingangsstatus nachlesen (könnte am Gerät umgeschaltet worden sein)
+        setInputUI(await load.getInput());
+      }
     }
   } catch (e) {
     if (load.connected) log('err', e.message);
@@ -301,7 +330,7 @@ async function poll() {
   schedulePoll(Math.max(0, Number($('interval').value) - elapsed));
 }
 
-function addSample({ v, i, p }) {
+function addSample({ v, i, p }, extra = {}) {
   const t = Date.now();
   const prev = state.history[state.history.length - 1];
   if (prev) {
@@ -309,7 +338,8 @@ function addSample({ v, i, p }) {
     state.energyWh += ((p + prev.p) / 2) * dtH;
     state.chargeAh += ((i + prev.i) / 2) * dtH;
   }
-  state.history.push({ t, v, i, p });
+  state.history.push({ t, v, i, p, test: rec.run?.meta.name ?? '' });
+  rec.add(t, v, i, p, extra);
   if (state.history.length > MAX_HISTORY) state.history.splice(0, MAX_HISTORY / 10);
 
   $('mV').textContent = v.toFixed(3);
@@ -336,23 +366,26 @@ $('btnClear').addEventListener('click', () => {
   plot.setData(state.history);
 });
 
-function downloadCsv(name, rows) {
-  const blob = new Blob([rows.join('\r\n')], { type: 'text/csv' });
+function downloadBlob(blob, name) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `${name}_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+  a.download = name;
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
 }
+
+const csvFormat = () => $('csvFormat').value;
+$('csvFormat').value = storageGet('kel103.csv') ?? 'de';
+$('csvFormat').addEventListener('change', () => storageSet('kel103.csv', csvFormat()));
 
 $('btnCsv').addEventListener('click', () => {
   if (!state.history.length) return;
-  const t0 = state.history[0].t;
-  const rows = ['zeit_iso;zeit_s;spannung_V;strom_A;leistung_W'];
-  for (const s of state.history) {
-    rows.push([new Date(s.t).toISOString(), ((s.t - t0) / 1000).toFixed(3), s.v, s.i, s.p].join(';'));
-  }
-  downloadCsv('kel103', rows);
+  const meta = {
+    name: 'Gesamtverlauf', startT: state.history[0].t, endT: state.history[state.history.length - 1].t,
+    params: {}, extraCols: [{ key: 'test', text: true }], noInfo: true,
+  };
+  const csv = runToCsv(meta, state.history, csvFormat());
+  downloadBlob(new Blob([csv], { type: 'text/csv' }), fileName(meta));
 });
 
 // ---------- Verlaufsdiagramm ----------
@@ -546,9 +579,24 @@ async function readDynamic() {
 }
 
 $('btnDynApply').addEventListener('click', applyDynamic);
+function dynParams() {
+  const mode = $('dynMode').value;
+  const d = DYN_MODES[mode];
+  const unit = MODES[d.base].unit;
+  const [l1, l2] = DYN_LABELS[mode];
+  const p = { Modus: d.label, [l1]: `${$('dynV1').value} ${unit}`, [l2]: `${$('dynV2').value} ${unit}` };
+  if (d.freq) { p.Frequenz = `${$('dynFreq').value} Hz`; p['Tastgrad Wert 2'] = `${$('dynDuty').value} %`; }
+  if (d.width) p.Pulsbreite = `${$('dynWidth').value} s`;
+  if (d.slopes) { p['Anstieg 1'] = `${$('dynS1').value} A/µs`; p['Anstieg 2'] = `${$('dynS2').value} A/µs`; }
+  return p;
+}
+
 $('btnDynStart').addEventListener('click', async () => {
   if (!(await applyDynamic())) return;
   try {
+    const params = dynParams();
+    const vals = Object.values(params).slice(1, 3).join(' / ');
+    rec.start('dyn', `Dynamik – ${params.Modus} ${vals}`, { params, endOnInputOff: true });
     await load.setInput(true);
     setInputUI(true);
     const d = DYN_MODES[$('dynMode').value];
@@ -569,6 +617,7 @@ $('btnDynStop').addEventListener('click', async () => {
 $('btnDynTrig').addEventListener('click', async () => {
   try {
     await load.trigger();
+    rec.event('Trigger');
   } catch (e) {
     dynMsg(e.message);
   }
@@ -695,15 +744,27 @@ async function saveList(start) {
     const mode = await load.getMode();
     setModeUI(mode);
     if (mode !== 'LIST') throw new Error(`Die Last ist nicht in den Sequenz-Modus gewechselt (Modus: ${mode}).`);
+    state.list = { running: true, slot, startT: Date.now(), total: listDuration(form) };
+    rec.start('list', `Sequenz – Platz ${slot}, ${form.steps.length} Stufen × ${form.repeat}`, {
+      params: {
+        Speicherplatz: slot,
+        Strombereich: `${form.range} A`,
+        Durchläufe: form.repeat,
+        Stufen: form.steps.map((s) => `${s.current} A/${s.slope} A/µs/${s.seconds} s`).join(' · '),
+      },
+    });
     await load.setInput(true);
     setInputUI(true);
-    state.list = { running: true, slot, startT: Date.now(), total: listDuration(form) };
     setListState('läuft', 'run');
     listMsg(`Sequenz von Platz ${slot} läuft (voraussichtlich ${fmtSeconds(state.list.total)}).`);
     log('info', `Sequenz gestartet: Platz ${slot}, ${form.steps.length} Stufen × ${form.repeat}`);
   } catch (e) {
     listMsg(e.message);
     log('err', `Sequenz: ${e.message}`);
+    if (listRunning()) {
+      state.list.running = false;
+      rec.end(`Fehler: ${e.message}`);
+    }
   }
   updateControls();
   schedulePoll(0);
@@ -729,6 +790,7 @@ function finishList(text, cls, msg) {
   setListState(text, cls);
   listMsg(`${msg} (${new Date().toLocaleTimeString()})`);
   log('info', msg);
+  if (rec.run?.meta.type === 'list') rec.end(msg);
   updateControls();
 }
 
@@ -744,6 +806,7 @@ async function stopList() {
 
 function attachRunningList() {
   state.list = { running: true, slot: null, startT: Date.now(), total: 0 };
+  rec.start('list', 'Sequenz (laufend am Gerät erkannt)');
   setListState('läuft', 'run');
   listMsg('Laufende Sequenz am Gerät erkannt.');
   updateControls();
@@ -846,6 +909,17 @@ async function startBattery() {
       running: true, params: p, ocv, external: false, stopRequested: false,
       lastT: null, energyWh: 0, cap: 0, minutes: 0, vStart: null, vEnd: null,
     };
+    rec.start('batt', `Entladetest – ${p.current} A bis ${p.cutoff} V`, {
+      params: {
+        Speicherplatz: p.slot,
+        Entladestrom: `${p.current} A`,
+        Schlussspannung: `${p.cutoff} V`,
+        Kapazitätsgrenze: `${p.capacity} Ah`,
+        Zeitlimit: `${p.minutes} min`,
+        Leerlaufspannung: `${ocv.toFixed(4)} V`,
+      },
+      extraCols: BATT_COLS,
+    });
     await load.setInput(true);
     setInputUI(true);
     setBattState('läuft', 'run');
@@ -856,16 +930,37 @@ async function startBattery() {
   } catch (e) {
     battMsg(e.message);
     log('err', `Entladetest: ${e.message}`);
+    if (battRunning()) {
+      state.batt.running = false;
+      rec.end(`Fehler: ${e.message}`);
+    }
   }
   updateControls();
   schedulePoll(0);
 }
 
-/** Wird bei jedem Messzyklus aufgerufen, solange der Test läuft. */
-async function updateBattery(m) {
+const BATT_COLS = [{ key: 'kapazitaet_mAh', digits: 2 }, { key: 'testzeit_min', digits: 3 }];
+
+/** Eingangsstatus, Kapazität und Testzeit vom Gerät lesen. */
+async function readBatteryInfo() {
   const b = state.batt;
-  const on = await load.getInput();
+  const info = { on: await load.getInput(), cap: b.cap, minutes: b.minutes };
+  try {
+    info.cap = await load.batteryCapacity();
+    info.minutes = await load.batteryMinutes();
+  } catch (e) {
+    log('err', `Kapazität/Zeit nicht lesbar: ${e.message}`);
+  }
+  return info;
+}
+
+/** Wird bei jedem Messzyklus aufgerufen, solange der Test läuft (nach addSample). */
+function processBattery(m, { on, cap, minutes }) {
+  const b = state.batt;
+  if (!b?.running) return; // während des Abfragens gestoppt – Werte sind veraltet
   setInputUI(on);
+  b.cap = cap;
+  b.minutes = minutes;
   const now = Date.now();
   if (on) {
     if (b.lastT !== null) b.energyWh += (m.p * (now - b.lastT)) / 3_600_000;
@@ -875,12 +970,6 @@ async function updateBattery(m) {
       if (b.vStart === null) b.vStart = m.v;
       b.vEnd = m.v;
     }
-  }
-  try {
-    b.cap = await load.batteryCapacity();
-    b.minutes = await load.batteryMinutes();
-  } catch (e) {
-    log('err', `Kapazität/Zeit nicht lesbar: ${e.message}`);
   }
   if (!on) finishBattery();
   renderBattery();
@@ -908,6 +997,14 @@ function finishBattery() {
   setBattState('beendet', cls);
   battMsg(`Beendet ${new Date().toLocaleTimeString()}: ${reason}.`);
   log('info', `Entladetest beendet: ${reason} · ${b.cap.toFixed(4)} Ah · ${b.energyWh.toFixed(3)} Wh · ${fmtDuration(b.minutes)}`);
+  if (rec.run?.meta.type === 'batt') {
+    rec.end(reason, {
+      'Ergebnis Kapazität': `${(b.cap * 1000).toFixed(1)} mAh`,
+      'Ergebnis Energie': `${b.energyWh.toFixed(3)} Wh${b.external ? ' (erst ab Wiederverbinden gezählt)' : ''}`,
+      'Ergebnis Dauer': fmtDuration(b.minutes),
+      'Spannung Start/Ende': b.vStart === null ? '—' : `${b.vStart.toFixed(3)} / ${b.vEnd.toFixed(3)} V`,
+    });
+  }
   updateControls();
 }
 
@@ -937,6 +1034,13 @@ async function attachRunningBattery() {
     lastT: null, energyWh: 0, cap: await load.batteryCapacity(), minutes: await load.batteryMinutes(),
     vStart: null, vEnd: null,
   };
+  rec.start('batt', 'Entladetest (laufend am Gerät erkannt)', {
+    params: p ? {
+      Entladestrom: `${p.current} A`, Schlussspannung: `${p.cutoff} V`,
+      Kapazitätsgrenze: `${p.capacity} Ah`, Zeitlimit: `${p.minutes.toFixed(2)} min`,
+    } : {},
+    extraCols: BATT_COLS,
+  });
   setBattState('läuft', 'run');
   battMsg('Laufender Batterietest am Gerät erkannt. Energie (*) wird erst ab jetzt gezählt.');
   updateControls();
@@ -1016,7 +1120,16 @@ async function runRi() {
   renderRi(points);
 
   await runExclusive('btnRi', async () => {
+    rec.start('ri', `Innenwiderstand – ${currents.join(' / ')} A`, {
+      params: {
+        Prüfströme: `${currents.join(' / ')} A`,
+        Pulsdauer: `${pulse / 1000} s`,
+        Pause: `${pause / 1000} s`,
+        Abbruchgrenze: `${vmin} V`,
+      },
+    });
     riStatus('Leerlaufspannung wird gemessen …');
+    rec.setPhase('Leerlauf');
     await load.setInput(false);
     setInputUI(false);
     const s0 = await sampleFor(pause);
@@ -1029,6 +1142,7 @@ async function runRi() {
     setModeUI('CC');
     for (const [k, current] of currents.entries()) {
       riStatus(`Puls ${k + 1} von ${currents.length}: ${current} A …`);
+      rec.setPhase(`Puls ${k + 1}: ${current} A`);
       await load.setSetpoint('CC', current);
       await load.setInput(true);
       setInputUI(true);
@@ -1045,11 +1159,19 @@ async function runRi() {
       renderRi(points);
       if (k < currents.length - 1) {
         riStatus('Erholungspause …');
+        rec.setPhase('Pause');
         await sampleFor(pause);
       }
     }
     riStatus(`Fertig (${new Date().toLocaleTimeString()}).`);
   }, (e) => riStatus(`Abgebrochen: ${e.message}`));
+
+  if (rec.run?.meta.type === 'ri') {
+    const fit = fitLine(points);
+    const result = { Messpunkte: points.map((p) => `${p.i.toFixed(3)} A → ${p.v.toFixed(4)} V`).join(' · ') };
+    if (fit) Object.assign(result, { 'Ergebnis Ri': fmtOhm(fit.r), 'Ergebnis U0': `${fit.v0.toFixed(4)} V`, 'R²': fit.r2.toFixed(4) });
+    rec.end($('riStatus').textContent, result);
+  }
 }
 $('btnRi').addEventListener('click', () => (state.busy === 'btnRi' ? runExclusive('btnRi') : runRi()));
 
@@ -1065,6 +1187,7 @@ async function runShort() {
   $('shortResult').textContent = '';
 
   await runExclusive('btnShort', async () => {
+    rec.start('short', `Kurzschluss – ${dur} s`, { params: { Dauer: `${dur} s` } });
     await load.setInput(false);
     setInputUI(false);
     await load.setShort();
@@ -1072,6 +1195,7 @@ async function runShort() {
     setModeUI(mode);
     if (mode !== 'SHORT') throw new Error(`Die Last ist nicht in den Kurzschluss-Modus gewechselt (Modus: ${mode}).`);
     msg('Kurzschluss aktiv …');
+    rec.setPhase('Kurzschluss');
     await load.setInput(true);
     setInputUI(true);
     let samples;
@@ -1081,12 +1205,16 @@ async function runShort() {
       await load.setInput(false);
       setInputUI(false);
     }
+    rec.setPhase('');
     const tail = samples.slice(-3);
     const iMax = Math.max(...samples.map((m) => m.i));
     $('shortResult').innerHTML = `Kurzschlussstrom ${avg(tail, 'i').toFixed(3)} A` +
       `<small>Restspannung ${avg(tail, 'v').toFixed(3)} V · Höchstwert ${iMax.toFixed(3)} A · ${samples.length} Messungen</small>`;
+    rec.setParam('Ergebnis Kurzschlussstrom', `${avg(tail, 'i').toFixed(3)} A`);
+    rec.setParam('Ergebnis Restspannung', `${avg(tail, 'v').toFixed(3)} V`);
     msg(`Fertig (${new Date().toLocaleTimeString()}).`);
   }, (e) => msg(`Abgebrochen: ${e.message}`));
+  if (rec.run?.meta.type === 'short') rec.end($('shortMsg').textContent);
 }
 $('btnShort').addEventListener('click', () => (state.busy === 'btnShort' ? runExclusive('btnShort') : runShort()));
 
@@ -1148,6 +1276,147 @@ $('sysBeep').addEventListener('change', async () => {
 });
 $('btnSysRead').addEventListener('click', () => readSystem().catch((e) => log('err', e.message)));
 
+// ---------- Messdateien ----------
+let fileList = [];
+const selectedFiles = new Set();
+let filesTimer = null;
+
+function scheduleFilesRefresh() {
+  if (filesTimer) return;
+  filesTimer = setTimeout(() => { filesTimer = null; refreshFiles(); }, 200);
+}
+
+async function refreshFiles() {
+  try {
+    fileList = await store.list();
+  } catch (e) {
+    log('err', `Messdateien nicht lesbar: ${e.message}`);
+    fileList = [];
+  }
+  // laufende Datei mit aktuellem Stand aus dem Speicher anzeigen
+  const active = rec.run?.meta;
+  if (active) {
+    fileList = fileList.filter((m) => m.id !== active.id);
+    fileList.push(active);
+  }
+  fileList.sort((a, b) => b.startT - a.startT);
+  for (const id of [...selectedFiles]) if (!fileList.some((m) => m.id === id)) selectedFiles.delete(id);
+  renderFiles();
+}
+
+function fmtDur(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+function renderFiles() {
+  const tbody = $('filesTable').tBodies[0];
+  tbody.innerHTML = '';
+  const activeId = rec.run?.meta.id;
+  for (const meta of fileList) {
+    const tr = tbody.insertRow();
+    const isActive = meta.id === activeId;
+    tr.classList.toggle('active', isActive);
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = selectedFiles.has(meta.id);
+    cb.setAttribute('aria-label', `${meta.name} auswählen`);
+    cb.addEventListener('change', () => {
+      cb.checked ? selectedFiles.add(meta.id) : selectedFiles.delete(meta.id);
+      updateFileButtons();
+    });
+    tr.insertCell().appendChild(cb);
+
+    const name = tr.insertCell();
+    const title = document.createElement('span');
+    title.className = 'fname';
+    title.textContent = meta.name;
+    const sub = document.createElement('span');
+    sub.className = 'fsub';
+    sub.textContent = isActive ? 'läuft …' : meta.endT ? meta.endReason || '' : 'nicht abgeschlossen (Seite geschlossen oder Absturz)';
+    name.append(title, sub);
+
+    tr.insertCell().textContent = new Date(meta.startT).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'medium' });
+    const endT = meta.endT ?? (isActive ? Date.now() : meta.lastT ?? meta.startT);
+    tr.insertCell().textContent = fmtDur(endT - meta.startT);
+    tr.insertCell().textContent = meta.count.toLocaleString('de-DE');
+
+    const actions = tr.insertCell();
+    const dl = document.createElement('button');
+    dl.textContent = 'CSV';
+    dl.title = 'Als CSV herunterladen';
+    dl.addEventListener('click', () => downloadFiles([meta.id]));
+    const del = document.createElement('button');
+    del.textContent = 'Löschen';
+    del.disabled = isActive;
+    del.addEventListener('click', () => deleteFiles([meta.id]));
+    actions.append(dl, del);
+  }
+  $('filesEmpty').hidden = fileList.length > 0;
+  $('filesInfo').textContent = `${fileList.length} Datei${fileList.length === 1 ? '' : 'en'}` +
+    (store.persistent ? '' : ' · nur bis zum Neuladen (Browser-Speicher nicht verfügbar)');
+  updateFileButtons();
+}
+
+function updateFileButtons() {
+  const n = selectedFiles.size;
+  $('btnFilesDl').disabled = n === 0;
+  $('btnFilesDl').textContent = n ? `${n} ausgewählte herunterladen` : 'Ausgewählte herunterladen';
+  $('btnFilesDel').disabled = n === 0;
+  $('btnFilesAll').disabled = fileList.length === 0;
+  $('filesAllCb').checked = n > 0 && n === fileList.length;
+  $('filesAllCb').indeterminate = n > 0 && n < fileList.length;
+}
+
+async function fileCsv(meta) {
+  if (meta.id === rec.run?.meta.id) await rec.flushNow();
+  const rows = await store.rows(meta.id);
+  return runToCsv(meta, rows, csvFormat());
+}
+
+async function downloadFiles(ids) {
+  const metas = fileList.filter((m) => ids.includes(m.id));
+  if (!metas.length) return;
+  try {
+    if (metas.length === 1) {
+      downloadBlob(new Blob([await fileCsv(metas[0])], { type: 'text/csv' }), fileName(metas[0]));
+      return;
+    }
+    const files = [];
+    for (const meta of metas) files.push({ name: fileName(meta), data: await fileCsv(meta) });
+    const d = new Date();
+    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    downloadBlob(makeZip(files), `kel103_messdateien_${stamp}_${metas.length}.zip`);
+  } catch (e) {
+    log('err', `Download fehlgeschlagen: ${e.message}`);
+  }
+}
+
+async function deleteFiles(ids) {
+  const activeId = rec.run?.meta.id;
+  const del = ids.filter((id) => id !== activeId);
+  if (!del.length) return;
+  if (!confirm(`${del.length === 1 ? 'Messdatei' : `${del.length} Messdateien`} endgültig löschen?`)) return;
+  for (const id of del) {
+    try { await store.remove(id); } catch (e) { log('err', e.message); }
+    selectedFiles.delete(id);
+  }
+  refreshFiles();
+}
+
+$('filesAllCb').addEventListener('change', () => {
+  if ($('filesAllCb').checked) fileList.forEach((m) => selectedFiles.add(m.id));
+  else selectedFiles.clear();
+  renderFiles();
+});
+$('btnFilesDl').addEventListener('click', () => downloadFiles([...selectedFiles]));
+$('btnFilesAll').addEventListener('click', () => downloadFiles(fileList.map((m) => m.id)));
+$('btnFilesDel').addEventListener('click', () => deleteFiles([...selectedFiles]));
+// Dauer/Anzahl der laufenden Datei regelmäßig aktualisieren
+setInterval(() => { if (rec.active) renderFiles(); }, 2000);
+
 // ---------- Konsole ----------
 $('consoleForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1177,6 +1446,10 @@ updateDynFields();
 setModeUI('CC');
 showTab(storageGet('kel103.tab') ?? 'dyn');
 updateControls();
+storeOpened.then(() => {
+  navigator.storage?.persist?.().catch(() => {}); // Browser bitten, die Messdateien nicht automatisch zu löschen
+  refreshFiles();
+});
 window.addEventListener('beforeunload', () => {
   // Best effort: Eingang beim Schließen der Seite ausschalten
   if (load.connected && $('offOnDisconnect').checked) load.setInput(false);

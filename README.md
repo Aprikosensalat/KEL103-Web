@@ -18,6 +18,12 @@ Kein Build-Schritt, keine Abhängigkeiten – reines HTML/CSS/JavaScript.
 - Eingang ein-/ausschalten
 - Betriebsart CC / CV / CR / CW wählen und Sollwert setzen
 - Aufzeichnung mit Energie- (Wh) und Ladungszähler (Ah), CSV-Export
+- Messdateien: Jeder Test und jedes Einschalten des Eingangs bekommt eine eigene Datei mit
+  Testname, Parametern, Ergebnis und Ablauf (Spalte `info`, z. B. „Puls 2: 1 A“, „Trigger“,
+  „Sollwert 0.4 A“); beim Entladetest zusätzlich `kapazitaet_mAh` und `testzeit_min`.
+  Die Dateien liegen im Browser (IndexedDB, alle 5 s gesichert) und lassen sich einzeln als CSV
+  oder gesammelt als ZIP herunterladen.
+- CSV wahlweise für deutsches Excel (`;`, Dezimalkomma, Ortszeit) oder international (`,`, Dezimalpunkt)
 - Konsole für beliebige SCPI-Befehle
 - Optional: Eingang beim Trennen automatisch ausschalten
 
@@ -95,5 +101,6 @@ jedem Befehl 50 ms Pause.
 - `kel103.js` – Treiber: serielle Verbindung, Befehlswarteschlange, KEL103-Befehle
 - `app.js` – UI-Logik, Messschleife, Entladetest, Innenwiderstand, CSV-Export
 - `plot.js` – Diagramme (Zeitverlauf, U-I-Kennlinie) ohne externe Bibliothek
+- `runs.js` – Messdateien: Speicherung (IndexedDB), CSV- und ZIP-Erzeugung ohne externe Bibliothek
 
 Hersteller-PDFs im Ordner sind per `.gitignore` vom Repository ausgeschlossen.

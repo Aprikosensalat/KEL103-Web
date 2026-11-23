@@ -157,6 +157,18 @@ input.wide { width: 160px; }
   background: var(--on);
 }
 h3 { font-size: 0.95rem; margin: 6px 0 6px; }
+
+/* Messdateien */
+.table-wrap.files { max-height: 380px; overflow-y: auto; }
+.files-table th, .files-table td { text-align: left; vertical-align: middle; }
+.files-table td:nth-child(4), .files-table td:nth-child(5),
+.files-table th:nth-child(4), .files-table th:nth-child(5) { text-align: right; }
+.files-table td:last-child { text-align: right; white-space: nowrap; }
+.files-table td:last-child button { padding: 3px 8px; font-size: 0.85rem; margin-left: 4px; }
+.files-table .fname { font-weight: 500; }
+.files-table .fsub { display: block; color: var(--muted); font-size: 0.8rem; }
+.files-table tr.active td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.files-table th:first-child, .files-table td:first-child { width: 28px; }
 .result.pass { color: var(--on); }
 .result.fail { color: var(--danger); }
 

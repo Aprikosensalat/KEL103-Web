@@ -345,11 +345,46 @@
             <option value="30000">30 s</option>
           </select>
         </label>
+        <label>CSV-Format
+          <select id="csvFormat">
+            <option value="de">Excel deutsch (; und Komma)</option>
+            <option value="int">International (, und Punkt)</option>
+          </select>
+        </label>
         <button id="btnPoll" disabled>Pause</button>
-        <button id="btnCsv">CSV exportieren</button>
+        <button id="btnCsv">Gesamtverlauf als CSV</button>
         <button id="btnClear">Verlauf löschen</button>
       </div>
       <p class="muted small"><span id="samples">0</span> Messwerte aufgezeichnet · Energie <span id="energy">0.000</span> Wh · Ladung <span id="charge">0.000</span> Ah</p>
+    </section>
+
+    <section class="card" id="filesCard">
+      <div class="card-head">
+        <h2>Messdateien</h2>
+        <span id="filesInfo" class="muted small"></span>
+      </div>
+      <p class="muted small">
+        Jeder Test und jedes Einschalten des Eingangs bekommt automatisch eine eigene Datei mit
+        Testname, Parametern und Ablauf (Spalte „info“). Die Dateien bleiben im Browser gespeichert,
+        auch nach dem Neuladen der Seite.
+      </p>
+      <div class="row">
+        <button id="btnFilesDl" disabled>Ausgewählte herunterladen</button>
+        <button id="btnFilesAll" disabled>Alle als ZIP herunterladen</button>
+        <button id="btnFilesDel" disabled>Ausgewählte löschen</button>
+      </div>
+      <div class="table-wrap files">
+        <table id="filesTable" class="grid-table files-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="filesAllCb" aria-label="Alle auswählen"></th>
+              <th>Ablauf</th><th>Start</th><th>Dauer</th><th>Messwerte</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="filesEmpty" class="muted small">Noch keine Messdateien.</p>
     </section>
 
     <section class="card console">
