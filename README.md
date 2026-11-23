@@ -29,7 +29,10 @@ Kein Build-Schritt, keine Abhängigkeiten – reines HTML/CSS/JavaScript.
 
 ## Starten
 
-Web Serial gibt es nur in **Chrome / Edge (Desktop)** und nur in sicherem Kontext
+**Online:** <https://aprikosensalat.github.io/KEL103-Web/> in Chrome oder Edge öffnen,
+**Verbinden** klicken und den COM-Port der Last wählen. Die Messdateien bleiben dabei lokal im Browser.
+
+**Lokal:** Web Serial gibt es nur in **Chrome / Edge (Desktop)** und nur in sicherem Kontext
 (`https://` oder `http://localhost`). Ein Doppelklick auf `index.html` (`file://`) reicht
 nicht, weil der Browser dort keine JavaScript-Module lädt – also kurz einen lokalen Server starten:
 
