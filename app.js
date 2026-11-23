@@ -2,7 +2,6 @@ import { KEL103, MODES, DYN_MODES, DYN_LIMITS } from './kel103.js';
 import { TimePlot, drawXY } from './plot.js';
 
 const $ = (id) => document.getElementById(id);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const load = new KEL103();
 
 const MAX_HISTORY = 500_000;
@@ -16,11 +15,23 @@ const state = {
   energyWh: 0,
   chargeAh: 0,
   cycle: 0,
-  busy: false, // läuft gerade die Innenwiderstandsmessung?
+  busy: null, // id des Start-Knopfs des laufenden Website-Tests (Ri, Kurzschluss)
   abort: false,
-  batt: null, // Zustand des internen Batterietests, siehe startBattery()
+  batt: null, // interner Batterietest
+  list: null, // laufende Sequenz
 };
 const battRunning = () => state.batt?.running === true;
+const listRunning = () => state.list?.running === true;
+const near = (a, b) => Math.abs(a - b) <= Math.max(1e-3, Math.abs(b) * 1e-3);
+const avg = (arr, key) => arr.reduce((s, x) => s + x[key], 0) / arr.length;
+const round4 = (x) => Math.round(x * 1e4) / 1e4;
+
+function storageGet(key) {
+  try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
+}
+function storageSet(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
 
 // ---------- Protokoll ----------
 const logEl = $('log');
@@ -34,35 +45,77 @@ function log(kind, text) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 load.onLog = (kind, text) => {
-  // Messabfragen nicht ins Log schreiben, sonst läuft es voll
-  if (kind !== 'err' && /^:MEAS:|^-?[\d.]+[VAW]$|^:INP\?$|^(ON|OFF)$/.test(text)) return;
+  // Routineabfragen nicht ins Log schreiben, sonst läuft es voll
+  if (kind !== 'err' && /^:MEAS:|^:BATT:(CAP|TIM)\?|^-?[\d.]+(V|A|W|AH|M)$|^:INP\?$|^(ON|OFF)$/.test(text)) return;
   log(kind, text);
 };
+
+// ---------- Reiter ----------
+const tabButtons = [...document.querySelectorAll('[data-tab]')];
+function showTab(name) {
+  if (!tabButtons.some((b) => b.dataset.tab === name)) name = tabButtons[0].dataset.tab;
+  for (const b of tabButtons) {
+    const active = b.dataset.tab === name;
+    b.setAttribute('aria-selected', String(active));
+    $(`tab-${b.dataset.tab}`).hidden = !active;
+  }
+  storageSet('kel103.tab', name);
+  if (name === 'ri') renderRi(state.riPoints ?? []); // Canvas braucht sichtbare Breite
+}
+for (const b of tabButtons) b.addEventListener('click', () => showTab(b.dataset.tab));
+
+const TEST_TABS = { btnRi: 'ri', btnShort: 'short' };
+function markRunningTabs() {
+  const running = new Set();
+  if (battRunning()) running.add('batt');
+  if (listRunning()) running.add('list');
+  if (state.busy) running.add(TEST_TABS[state.busy]);
+  if (['DYNAMIC'].includes(state.mode) && state.inputOn) running.add('dyn');
+  for (const b of tabButtons) b.classList.toggle('running', running.has(b.dataset.tab));
+}
 
 // ---------- UI-Zustand ----------
 function updateControls() {
   const connected = load.connected;
-  const free = connected && !state.busy;
+  const anyTest = !!state.busy || battRunning() || listRunning();
+  const free = connected && !anyTest;
   $('btnConnect').textContent = connected ? 'Trennen' : 'Verbinden';
   $('status').textContent = connected ? 'verbunden' : 'getrennt';
   $('status').classList.toggle('on', connected);
+
+  // Grundsteuerung bleibt bei Batterietest/Sequenz bedienbar (z. B. Eingang aus = Stopp)
   for (const id of ['btnInput', 'mode', 'setpoint', 'btnApply', 'btnPoll', 'cmd', 'btnSend']) {
-    $(id).disabled = !free;
+    $(id).disabled = !connected || !!state.busy;
   }
-  $('btnRi').disabled = !connected || (!state.busy && battRunning());
-  $('btnRi').textContent = state.busy ? 'Abbrechen' : 'Messung starten';
-  $('btnRi').classList.toggle('primary', !state.busy);
-  $('btnBattLoad').disabled = !free || battRunning();
-  $('btnBattStart').disabled = !free || battRunning();
+
+  // Website-Tests: der laufende Knopf wird zu „Abbrechen“
+  for (const id of Object.keys(TEST_TABS)) {
+    const btn = $(id);
+    const mine = state.busy === id;
+    btn.disabled = !(mine || free);
+    btn.textContent = mine ? 'Abbrechen' : btn.dataset.label;
+    btn.classList.toggle('primary', !mine);
+  }
+
+  for (const id of ['btnDynStart', 'btnDynApply', 'btnDynRead']) $(id).disabled = !free;
+  $('btnDynStop').disabled = !connected || !!state.busy;
+  $('btnDynTrig').disabled = !free || !DYN_MODES[$('dynMode').value]?.trigger;
+
+  $('btnBattLoad').disabled = !free;
+  $('btnBattStart').disabled = !free;
   $('btnBattStop').disabled = !connected || !battRunning();
-  const dynFree = free && !battRunning();
-  for (const id of ['btnDynStart', 'btnDynApply', 'btnDynRead']) $(id).disabled = !dynFree;
-  $('btnDynStop').disabled = !connected;
-  $('btnDynTrig').disabled = !dynFree || !DYN_MODES[$('dynMode').value]?.trigger;
+
+  $('btnListStart').disabled = !free;
+  $('btnListSave').disabled = !free;
+  $('btnListStop').disabled = !connected || !listRunning();
+
+  for (const id of ['btnMemSave', 'btnMemRecall', 'sysBeep', 'btnSysRead']) $(id).disabled = !free;
+
   if (!connected) {
     $('idn').textContent = '—';
     setInputUI(false);
   }
+  markRunningTabs();
 }
 
 function setInputUI(on) {
@@ -72,51 +125,45 @@ function setInputUI(on) {
   btn.classList.toggle('is-on', on);
   $('inputState').textContent = on ? 'Eingang an' : 'Eingang aus';
   $('inputState').classList.toggle('on', on);
+  markRunningTabs();
 }
+
+const SPECIAL_MODES = { BATTERY: 'Batterietest (intern)', DYNAMIC: 'Dynamik', LIST: 'Sequenz', SHORT: 'Kurzschluss' };
 
 function setModeUI(mode) {
   state.mode = mode;
   const m = MODES[mode];
   if (!m) {
-    // Batterietest, Dynamik oder anderer Sondermodus des Geräts
-    $('mode').value = ['BATTERY', 'DYNAMIC'].includes(mode) ? mode : '';
+    $('mode').value = SPECIAL_MODES[mode] ? mode : '';
     $('unit').textContent = '—';
     $('curSet').textContent = '—';
+    markRunningTabs();
     return;
   }
   $('mode').value = mode;
   $('unit').textContent = m.unit;
   $('setpoint').max = m.max;
   $('setpoint').step = m.step;
+  markRunningTabs();
 }
 
-for (const [key, m] of Object.entries(MODES)) {
-  const opt = document.createElement('option');
-  opt.value = key;
-  opt.textContent = m.label;
-  $('mode').appendChild(opt);
+function addOptions(select, entries, disabled = false) {
+  for (const [value, text] of entries) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = text;
+    opt.disabled = disabled;
+    select.appendChild(opt);
+  }
 }
-for (const [value, text] of [['BATTERY', 'Batterietest (intern)'], ['DYNAMIC', 'Dynamik']]) {
-  const opt = document.createElement('option');
-  opt.value = value;
-  opt.textContent = text;
-  opt.disabled = true;
-  $('mode').appendChild(opt);
-}
-for (const [key, d] of Object.entries(DYN_MODES)) {
-  const opt = document.createElement('option');
-  opt.value = key;
-  opt.textContent = d.label;
-  $('dynMode').appendChild(opt);
-}
+addOptions($('mode'), Object.entries(MODES).map(([k, m]) => [k, m.label]));
+addOptions($('mode'), Object.entries(SPECIAL_MODES), true);
+addOptions($('dynMode'), Object.entries(DYN_MODES).map(([k, d]) => [k, d.label]));
 $('dynMode').value = '2';
-for (let n = 1; n <= 10; n++) {
-  const opt = document.createElement('option');
-  opt.value = n;
-  opt.textContent = n;
-  $('battSlot').appendChild(opt);
-}
+addOptions($('battSlot'), Array.from({ length: 10 }, (_, i) => [i + 1, i + 1]));
 $('battSlot').value = '10';
+addOptions($('listSlot'), Array.from({ length: 7 }, (_, i) => [i + 1, i + 1]));
+$('listSlot').value = '7';
 
 // ---------- Verbindung ----------
 async function connect() {
@@ -136,9 +183,15 @@ async function connect() {
     setModeUI(mode);
     await refreshSetpoint();
     if (mode === 'BATTERY' && on) await attachRunningBattery();
+    if (mode === 'LIST' && on) attachRunningList();
     if (mode === 'DYNAMIC') await readDynamic();
   } catch (e) {
-    log('err', `${e.message} – stimmt die Baudrate? (Gerätemenü: System → Baudrate)`);
+    log('err', `${e.message} – richtiger Port gewählt? Bei RS232 muss die Baudrate passen (am Gerät: Shift + 0).`);
+  }
+  try {
+    await readSystem();
+  } catch (e) {
+    log('err', `Systemwerte nicht lesbar: ${e.message}`);
   }
   schedulePoll(0);
 }
@@ -154,12 +207,18 @@ async function disconnect() {
 
 load.onDisconnect = () => {
   stopPoll();
+  const kept = $('offOnDisconnect').checked
+    ? 'der Eingang wurde ausgeschaltet.'
+    : 'der Ablauf läuft am Gerät weiter. Zum Weiterverfolgen neu verbinden.';
   if (battRunning()) {
     state.batt.running = false;
     setBattState('getrennt', 'fail');
-    battMsg($('offOnDisconnect').checked
-      ? 'Verbindung getrennt – der Eingang wurde ausgeschaltet, der Test ist beendet.'
-      : 'Verbindung getrennt – der Test läuft am Gerät weiter. Zum Weiterverfolgen neu verbinden.');
+    battMsg(`Verbindung getrennt – ${kept}`);
+  }
+  if (listRunning()) {
+    state.list.running = false;
+    setListState('getrennt', 'fail');
+    listMsg(`Verbindung getrennt – ${kept}`);
   }
   updateControls();
   log('info', 'Port geschlossen');
@@ -167,9 +226,10 @@ load.onDisconnect = () => {
 
 $('btnConnect').addEventListener('click', () => (load.connected ? disconnect() : connect()));
 
-// ---------- Steuerung ----------
+// ---------- Grundsteuerung ----------
 $('btnInput').addEventListener('click', async () => {
   if (battRunning() && state.inputOn) return stopBattery();
+  if (listRunning() && state.inputOn) return stopList();
   try {
     await load.setInput(!state.inputOn);
     setInputUI(await load.getInput());
@@ -220,7 +280,7 @@ function stopPoll() {
 }
 
 async function poll() {
-  // Während eines Tests liefert der Test selbst die Messwerte
+  // Während eines Website-Tests liefert der Test selbst die Messwerte
   if (state.busy) return schedulePoll();
   const started = performance.now();
   try {
@@ -228,6 +288,8 @@ async function poll() {
     addSample(m);
     if (battRunning()) {
       await updateBattery(m);
+    } else if (listRunning()) {
+      await updateList();
     } else if (state.cycle++ % 5 === 0) {
       // Eingangsstatus gelegentlich nachlesen (könnte am Gerät umgeschaltet worden sein)
       setInputUI(await load.getInput());
@@ -312,12 +374,13 @@ $('window').addEventListener('change', () => {
   plot.requestDraw();
 });
 
-// ---------- Innenwiderstand ----------
-const riStatus = (text) => { $('riStatus').textContent = text; };
-const avg = (arr, key) => arr.reduce((s, x) => s + x[key], 0) / arr.length;
+// ---------- Gemeinsamer Rahmen für Website-Tests ----------
 
-/** Misst `ms` lang so schnell wie möglich, bricht bei Unterspannung oder Abbruch ab. */
-async function sampleFor(ms, vmin = null) {
+/**
+ * Misst `ms` lang so schnell wie möglich.
+ * vmin: Abbruch mit Fehler bei Unterspannung; stopIf(m): vorzeitig (ohne Fehler) beenden.
+ */
+async function sampleFor(ms, { vmin = null, stopIf = null } = {}) {
   const end = performance.now() + ms;
   const out = [];
   do {
@@ -328,147 +391,51 @@ async function sampleFor(ms, vmin = null) {
     if (vmin !== null && m.v < vmin) {
       throw new Error(`Spannung ${m.v.toFixed(3)} V unter Abbruchgrenze ${vmin} V`);
     }
+    if (stopIf?.(m)) break;
   } while (performance.now() < end);
   return out;
 }
 
-function parseCurrents(text) {
-  return text
-    .split(/[;\s]+/)
-    .filter(Boolean)
-    .map((s) => parseFloat(s.replace(',', '.')));
-}
-
-/** Lineare Regression U = U0 − Ri·I */
-function fitLine(points) {
-  const n = points.length;
-  if (n < 2) return null;
-  const mi = avg(points, 'i'), mv = avg(points, 'v');
-  let sxx = 0, sxy = 0, syy = 0;
-  for (const p of points) {
-    sxx += (p.i - mi) ** 2;
-    sxy += (p.i - mi) * (p.v - mv);
-    syy += (p.v - mv) ** 2;
-  }
-  if (sxx < 1e-12) return null;
-  const slope = sxy / sxx;
-  const r2 = syy > 0 ? (sxy * sxy) / (sxx * syy) : 1;
-  return { r: -slope, v0: mv - slope * mi, r2 };
-}
-
-const fmtOhm = (r) => (Math.abs(r) < 1 ? `${(r * 1000).toFixed(1)} mΩ` : `${r.toFixed(3)} Ω`);
-
-function renderRi(points) {
-  const tbody = $('riTable').tBodies[0];
-  tbody.innerHTML = '';
-  const v0 = points[0]?.v;
-  for (const p of points) {
-    const tr = tbody.insertRow();
-    const dv = v0 - p.v;
-    const cells = [
-      p.set === 0 ? 'Leerlauf' : `${p.set} A`,
-      `${p.i.toFixed(3)} A`,
-      `${p.v.toFixed(4)} V`,
-      p.set === 0 ? '—' : `${(dv * 1000).toFixed(1)} mV`,
-      p.set === 0 || p.i <= 0 ? '—' : fmtOhm(dv / p.i),
-    ];
-    for (const c of cells) tr.insertCell().textContent = c;
-  }
-  const fit = fitLine(points);
-  $('riResult').innerHTML = fit
-    ? `Ri = ${fmtOhm(fit.r)}<small>Ausgleichsgerade über ${points.length} Punkte · R² = ${fit.r2.toFixed(4)} · U₀ = ${fit.v0.toFixed(4)} V</small>`
-    : '';
-  drawXY($('riPlot'), points, fit);
-  state.riPoints = points;
-}
-
-async function runRi() {
-  if (battRunning()) {
-    riStatus('Während eines Entladetests nicht möglich.');
+/**
+ * Führt einen Test exklusiv aus: Messschleife pausiert, Eingang am Ende sicher aus,
+ * Betriebsart und CC/CW-Sollwerte werden wiederhergestellt.
+ * Ein zweiter Klick auf denselben Knopf bricht ab.
+ */
+async function runExclusive(btnId, fn, onError) {
+  if (state.busy) {
+    if (state.busy === btnId) state.abort = true;
     return;
   }
-  const currents = parseCurrents($('riCurrents').value);
-  const pulse = Number($('riPulse').value) * 1000;
-  const pause = Number($('riPause').value) * 1000;
-  const vmin = Number($('riVmin').value);
-  if (!currents.length || currents.some((i) => !(i > 0 && i <= MODES.CC.max))) {
-    riStatus(`Ungültige Prüfströme – erlaubt sind Werte über 0 bis ${MODES.CC.max} A, getrennt mit Semikolon oder Leerzeichen.`);
-    return;
-  }
-  if (!(pulse >= 500) || !(pause >= 500) || !(vmin >= 0)) {
-    riStatus('Pulsdauer und Pause müssen mindestens 0,5 s sein, die Abbruchgrenze ≥ 0 V.');
-    return;
-  }
-
-  state.busy = true;
+  if (!load.connected || battRunning() || listRunning()) return;
+  state.busy = btnId;
   state.abort = false;
   updateControls();
-  const prevMode = state.mode;
-  let prevCC = null;
-  try { prevCC = await load.getSetpoint('CC'); } catch {}
 
-  const points = [];
-  renderRi(points);
+  const saved = {};
+  try { saved.mode = await load.getMode(); } catch {}
+  try { saved.cc = await load.getSetpoint('CC'); } catch {}
+  try { saved.cw = await load.getSetpoint('CW'); } catch {}
+
   try {
-    riStatus('Leerlaufspannung wird gemessen …');
-    await load.setInput(false);
-    setInputUI(false);
-    const s0 = await sampleFor(pause);
-    const v0 = avg(s0.slice(-3), 'v');
-    if (v0 < vmin) throw new Error(`Leerlaufspannung ${v0.toFixed(3)} V liegt unter der Abbruchgrenze`);
-    points.push({ set: 0, i: 0, v: v0 });
-    renderRi(points);
-
-    await load.setMode('CC');
-    setModeUI('CC');
-    for (const [k, current] of currents.entries()) {
-      riStatus(`Puls ${k + 1} von ${currents.length}: ${current} A …`);
-      await load.setSetpoint('CC', current);
-      await load.setInput(true);
-      setInputUI(true);
-      let samples;
-      try {
-        samples = await sampleFor(pulse, vmin);
-      } finally {
-        await load.setInput(false);
-        setInputUI(false);
-      }
-      // Mittelwert der letzten Messungen am Pulsende (nach dem Einschwingen)
-      const last = samples.slice(-3);
-      points.push({ set: current, i: avg(last, 'i'), v: avg(last, 'v') });
-      renderRi(points);
-      if (k < currents.length - 1) {
-        riStatus('Erholungspause …');
-        await sampleFor(pause);
-      }
-    }
-    riStatus(`Fertig (${new Date().toLocaleTimeString()}).`);
+    await fn();
   } catch (e) {
-    riStatus(`Abgebrochen: ${e.message}`);
-    log('err', `Innenwiderstand: ${e.message}`);
+    onError?.(e);
+    log('err', e.message);
   } finally {
-    // Eingang sicher aus, vorherige Einstellungen wiederherstellen
     try { await load.setInput(false); setInputUI(false); } catch {}
     try {
-      if (prevCC !== null) await load.setSetpoint('CC', prevCC);
-      if (MODES[prevMode]) { await load.setMode(prevMode); setModeUI(prevMode); }
+      if (saved.cc !== undefined) await load.setSetpoint('CC', saved.cc);
+      if (saved.cw !== undefined) await load.setSetpoint('CW', saved.cw);
+      await load.setMode(MODES[saved.mode] ? saved.mode : 'CC');
+      setModeUI(await load.getMode());
       await refreshSetpoint();
     } catch {}
-    state.busy = false;
+    state.busy = null;
     state.abort = false;
     updateControls();
     schedulePoll(0);
   }
 }
-
-$('btnRi').addEventListener('click', () => {
-  if (state.busy) {
-    state.abort = true;
-    riStatus('Wird abgebrochen …');
-  } else {
-    runRi();
-  }
-});
 
 // ---------- Dynamik ----------
 const dynMsg = (text) => { $('dynMsg').textContent = text; };
@@ -508,6 +475,9 @@ function fillDynForm(p) {
   updateDynFields();
 }
 
+const inRange = (x, [a, b]) => x >= a && x <= b;
+const check = (ok, msg) => { if (!ok) throw new Error(msg); };
+
 function readDynForm() {
   const mode = Number($('dynMode').value);
   const d = DYN_MODES[mode];
@@ -518,8 +488,6 @@ function readDynForm() {
     s1: Number($('dynS1').value), s2: Number($('dynS2').value),
     width: Number($('dynWidth').value),
   };
-  const inRange = (x, [a, b]) => x >= a && x <= b;
-  const check = (ok, msg) => { if (!ok) throw new Error(msg); };
   check(inRange(p.v1, [0, m.max]) && inRange(p.v2, [0, m.max]), `Die Werte müssen zwischen 0 und ${m.max} ${m.unit} liegen.`);
   if (d.freq) {
     check(inRange(p.freq, DYN_LIMITS.freq), `Die Frequenz muss zwischen ${DYN_LIMITS.freq[0]} und ${DYN_LIMITS.freq[1]} Hz liegen.`);
@@ -583,7 +551,8 @@ $('btnDynStart').addEventListener('click', async () => {
   try {
     await load.setInput(true);
     setInputUI(true);
-    dynMsg(`${DYN_MODES[$('dynMode').value].label} läuft${DYN_MODES[$('dynMode').value].trigger ? ' – mit „Trigger auslösen“ schalten' : ''}.`);
+    const d = DYN_MODES[$('dynMode').value];
+    dynMsg(`${d.label} läuft${d.trigger ? ' – mit „Trigger auslösen“ schalten' : ''}.`);
   } catch (e) {
     dynMsg(e.message);
   }
@@ -606,9 +575,186 @@ $('btnDynTrig').addEventListener('click', async () => {
 });
 $('btnDynRead').addEventListener('click', () => readDynamic().catch((e) => dynMsg(e.message)));
 
+// ---------- Sequenz ----------
+const listMsg = (text) => { $('listMsg').textContent = text; };
+const LIST_LIMITS = { steps: 84, slope: [0.001, 1], seconds: [0.01, 999], repeat: [1, 999] };
+
+function setListState(text, cls) {
+  $('listState').textContent = text;
+  $('listState').className = `status ${cls}`;
+}
+
+function addListRow(step = { current: 0.5, slope: 0.1, seconds: 1 }) {
+  const tbody = $('listTable').tBodies[0];
+  if (tbody.rows.length >= LIST_LIMITS.steps) return;
+  const tr = tbody.insertRow();
+  tr.insertCell();
+  for (const [key, stepAttr] of [['current', '0.001'], ['slope', '0.001'], ['seconds', '0.01']]) {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '0';
+    input.step = stepAttr;
+    input.value = step[key];
+    input.dataset.key = key;
+    input.addEventListener('input', updateListInfo);
+    tr.insertCell().appendChild(input);
+  }
+  const del = document.createElement('button');
+  del.textContent = '✕';
+  del.title = 'Stufe entfernen';
+  del.addEventListener('click', () => {
+    if (tbody.rows.length > 1) tr.remove();
+    updateListInfo();
+  });
+  tr.insertCell().appendChild(del);
+  updateListInfo();
+}
+
+function readListForm() {
+  const range = Number($('listRange').value);
+  const repeat = Number($('listRepeat').value);
+  const steps = [...$('listTable').tBodies[0].rows].map((tr) => {
+    const get = (k) => Number(tr.querySelector(`[data-key="${k}"]`).value);
+    return { current: get('current'), slope: get('slope'), seconds: get('seconds') };
+  });
+  return { range, repeat, steps };
+}
+
+function validateList({ range, repeat, steps }) {
+  check(steps.length >= 1 && steps.length <= LIST_LIMITS.steps, `1 bis ${LIST_LIMITS.steps} Stufen erlaubt.`);
+  check(Number.isInteger(repeat) && inRange(repeat, LIST_LIMITS.repeat), `Durchläufe: ${LIST_LIMITS.repeat[0]} bis ${LIST_LIMITS.repeat[1]}.`);
+  steps.forEach((s, k) => {
+    check(inRange(s.current, [0, range]), `Stufe ${k + 1}: Strom muss zwischen 0 und ${range} A liegen (Strombereich).`);
+    check(inRange(s.slope, LIST_LIMITS.slope), `Stufe ${k + 1}: Anstieg muss zwischen ${LIST_LIMITS.slope[0]} und ${LIST_LIMITS.slope[1]} A/µs liegen.`);
+    check(inRange(s.seconds, LIST_LIMITS.seconds), `Stufe ${k + 1}: Dauer muss zwischen ${LIST_LIMITS.seconds[0]} und ${LIST_LIMITS.seconds[1]} s liegen.`);
+  });
+}
+
+function listDuration({ repeat, steps }) {
+  return steps.reduce((s, x) => s + x.seconds, 0) * repeat;
+}
+
+function fmtSeconds(s) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s - h * 3600 - m * 60;
+  return h ? `${h} h ${m} min` : m ? `${m} min ${Math.round(sec)} s` : `${sec.toFixed(sec < 10 ? 2 : 0)} s`;
+}
+
+function updateListInfo() {
+  const form = readListForm();
+  const n = form.steps.length;
+  $('btnListAdd').disabled = n >= LIST_LIMITS.steps;
+  [...$('listTable').tBodies[0].rows].forEach((tr, k) => { tr.cells[0].textContent = k + 1; });
+  const per = listDuration({ ...form, repeat: 1 });
+  $('listInfo').textContent = `${n} Stufe${n === 1 ? '' : 'n'} · ${fmtSeconds(per)} pro Durchlauf · gesamt ${fmtSeconds(per * form.repeat)}`;
+}
+
+function fillListForm({ range, repeat, steps }) {
+  $('listRange').value = String(range);
+  $('listRepeat').value = repeat;
+  $('listTable').tBodies[0].innerHTML = '';
+  for (const s of steps) addListRow(s);
+  updateListInfo();
+}
+
+function loadListFromBrowser() {
+  const saved = storageGet(`kel103.list.${$('listSlot').value}`);
+  if (saved) {
+    fillListForm(saved);
+    listMsg(`Zuletzt auf Platz ${$('listSlot').value} gespeicherte Sequenz (aus dem Browser) geladen.`);
+  } else {
+    listMsg(`Für Platz ${$('listSlot').value} ist im Browser nichts gespeichert – die Tabelle zeigt die aktuelle Eingabe.`);
+  }
+}
+$('listSlot').addEventListener('change', loadListFromBrowser);
+$('listRepeat').addEventListener('input', updateListInfo);
+$('listRange').addEventListener('change', updateListInfo);
+$('btnListAdd').addEventListener('click', () => addListRow());
+
+async function saveList(start) {
+  let form;
+  try {
+    form = readListForm();
+    validateList(form);
+  } catch (e) {
+    listMsg(e.message);
+    return;
+  }
+  const slot = Number($('listSlot').value);
+  try {
+    if (state.inputOn) {
+      await load.setInput(false);
+      setInputUI(false);
+    }
+    await load.saveList(slot, form);
+    storageSet(`kel103.list.${slot}`, form);
+    if (!start) {
+      listMsg(`Sequenz auf Platz ${slot} gespeichert.`);
+      return;
+    }
+    await load.recallList(slot);
+    const mode = await load.getMode();
+    setModeUI(mode);
+    if (mode !== 'LIST') throw new Error(`Die Last ist nicht in den Sequenz-Modus gewechselt (Modus: ${mode}).`);
+    await load.setInput(true);
+    setInputUI(true);
+    state.list = { running: true, slot, startT: Date.now(), total: listDuration(form) };
+    setListState('läuft', 'run');
+    listMsg(`Sequenz von Platz ${slot} läuft (voraussichtlich ${fmtSeconds(state.list.total)}).`);
+    log('info', `Sequenz gestartet: Platz ${slot}, ${form.steps.length} Stufen × ${form.repeat}`);
+  } catch (e) {
+    listMsg(e.message);
+    log('err', `Sequenz: ${e.message}`);
+  }
+  updateControls();
+  schedulePoll(0);
+}
+
+async function updateList() {
+  const on = await load.getInput();
+  setInputUI(on);
+  const l = state.list;
+  if (!on) {
+    finishList('beendet', 'done', 'Sequenz abgeschlossen.');
+    return;
+  }
+  if (l.total) {
+    const elapsed = (Date.now() - l.startT) / 1000;
+    listMsg(`Sequenz läuft: ${fmtSeconds(elapsed)} von ca. ${fmtSeconds(l.total)} (${Math.min(100, (100 * elapsed) / l.total).toFixed(0)} %).`);
+  }
+}
+
+function finishList(text, cls, msg) {
+  if (!listRunning()) return;
+  state.list.running = false;
+  setListState(text, cls);
+  listMsg(`${msg} (${new Date().toLocaleTimeString()})`);
+  log('info', msg);
+  updateControls();
+}
+
+async function stopList() {
+  try {
+    await load.setInput(false);
+    setInputUI(false);
+  } catch (e) {
+    log('err', e.message);
+  }
+  finishList('gestoppt', 'off', 'Sequenz gestoppt.');
+}
+
+function attachRunningList() {
+  state.list = { running: true, slot: null, startT: Date.now(), total: 0 };
+  setListState('läuft', 'run');
+  listMsg('Laufende Sequenz am Gerät erkannt.');
+  updateControls();
+}
+
+$('btnListSave').addEventListener('click', () => saveList(false));
+$('btnListStart').addEventListener('click', () => saveList(true));
+$('btnListStop').addEventListener('click', stopList);
+
 // ---------- Entladetest (interne Batterietest-Funktion) ----------
 const battMsg = (text) => { $('battMsg').textContent = text; };
-const near = (a, b) => Math.abs(a - b) <= Math.max(1e-3, Math.abs(b) * 1e-3);
 
 function setBattState(text, cls) {
   $('battState').textContent = text;
@@ -639,10 +785,10 @@ function readBattForm() {
     capacity: Number($('battCapacity').value),
     minutes: Number($('battMinutes').value),
   };
-  if (!(p.current > 0 && p.current <= MODES.CC.max)) throw new Error(`Der Entladestrom muss zwischen 0 und ${MODES.CC.max} A liegen.`);
-  if (!(p.cutoff >= 0 && p.cutoff <= MODES.CV.max)) throw new Error('Ungültige Schlussspannung.');
-  if (!(p.capacity > 0)) throw new Error('Die Kapazitätsgrenze muss größer als 0 sein.');
-  if (!(p.minutes > 0)) throw new Error('Das Zeitlimit muss größer als 0 sein.');
+  check(p.current > 0 && p.current <= MODES.CC.max, `Der Entladestrom muss zwischen 0 und ${MODES.CC.max} A liegen.`);
+  check(p.cutoff >= 0 && p.cutoff <= MODES.CV.max, 'Ungültige Schlussspannung.');
+  check(p.capacity > 0, 'Die Kapazitätsgrenze muss größer als 0 sein.');
+  check(p.minutes > 0, 'Das Zeitlimit muss größer als 0 sein.');
   return p;
 }
 
@@ -800,6 +946,208 @@ async function attachRunningBattery() {
 $('btnBattStart').addEventListener('click', startBattery);
 $('btnBattStop').addEventListener('click', stopBattery);
 
+// ---------- Innenwiderstand ----------
+const riStatus = (text) => { $('riStatus').textContent = text; };
+
+function parseCurrents(text) {
+  return text
+    .split(/[;\s]+/)
+    .filter(Boolean)
+    .map((s) => parseFloat(s.replace(',', '.')));
+}
+
+/** Lineare Regression U = U0 − Ri·I */
+function fitLine(points) {
+  const n = points.length;
+  if (n < 2) return null;
+  const mi = avg(points, 'i'), mv = avg(points, 'v');
+  let sxx = 0, sxy = 0, syy = 0;
+  for (const p of points) {
+    sxx += (p.i - mi) ** 2;
+    sxy += (p.i - mi) * (p.v - mv);
+    syy += (p.v - mv) ** 2;
+  }
+  if (sxx < 1e-12) return null;
+  const slope = sxy / sxx;
+  const r2 = syy > 0 ? (sxy * sxy) / (sxx * syy) : 1;
+  return { r: -slope, v0: mv - slope * mi, r2 };
+}
+
+const fmtOhm = (r) => (Math.abs(r) < 1 ? `${(r * 1000).toFixed(1)} mΩ` : `${r.toFixed(3)} Ω`);
+
+function renderRi(points) {
+  const tbody = $('riTable').tBodies[0];
+  tbody.innerHTML = '';
+  const v0 = points[0]?.v;
+  for (const p of points) {
+    const tr = tbody.insertRow();
+    const dv = v0 - p.v;
+    const cells = [
+      p.set === 0 ? 'Leerlauf' : `${p.set} A`,
+      `${p.i.toFixed(3)} A`,
+      `${p.v.toFixed(4)} V`,
+      p.set === 0 ? '—' : `${(dv * 1000).toFixed(1)} mV`,
+      p.set === 0 || p.i <= 0 ? '—' : fmtOhm(dv / p.i),
+    ];
+    for (const c of cells) tr.insertCell().textContent = c;
+  }
+  const fit = fitLine(points);
+  $('riResult').innerHTML = fit
+    ? `Ri = ${fmtOhm(fit.r)}<small>Ausgleichsgerade über ${points.length} Punkte · R² = ${fit.r2.toFixed(4)} · U₀ = ${fit.v0.toFixed(4)} V</small>`
+    : '';
+  if (!$('tab-ri').hidden) drawXY($('riPlot'), points, fit);
+  state.riPoints = points;
+}
+
+async function runRi() {
+  const currents = parseCurrents($('riCurrents').value);
+  const pulse = Number($('riPulse').value) * 1000;
+  const pause = Number($('riPause').value) * 1000;
+  const vmin = Number($('riVmin').value);
+  if (!currents.length || currents.some((i) => !(i > 0 && i <= MODES.CC.max))) {
+    riStatus(`Ungültige Prüfströme – erlaubt sind Werte über 0 bis ${MODES.CC.max} A, getrennt mit Semikolon oder Leerzeichen.`);
+    return;
+  }
+  if (!(pulse >= 500) || !(pause >= 500) || !(vmin >= 0)) {
+    riStatus('Pulsdauer und Pause müssen mindestens 0,5 s sein, die Abbruchgrenze ≥ 0 V.');
+    return;
+  }
+  const points = [];
+  renderRi(points);
+
+  await runExclusive('btnRi', async () => {
+    riStatus('Leerlaufspannung wird gemessen …');
+    await load.setInput(false);
+    setInputUI(false);
+    const s0 = await sampleFor(pause);
+    const v0 = avg(s0.slice(-3), 'v');
+    if (v0 < vmin) throw new Error(`Leerlaufspannung ${v0.toFixed(3)} V liegt unter der Abbruchgrenze`);
+    points.push({ set: 0, i: 0, v: v0 });
+    renderRi(points);
+
+    await load.setMode('CC');
+    setModeUI('CC');
+    for (const [k, current] of currents.entries()) {
+      riStatus(`Puls ${k + 1} von ${currents.length}: ${current} A …`);
+      await load.setSetpoint('CC', current);
+      await load.setInput(true);
+      setInputUI(true);
+      let samples;
+      try {
+        samples = await sampleFor(pulse, { vmin });
+      } finally {
+        await load.setInput(false);
+        setInputUI(false);
+      }
+      // Mittelwert der letzten Messungen am Pulsende (nach dem Einschwingen)
+      const last = samples.slice(-3);
+      points.push({ set: current, i: avg(last, 'i'), v: avg(last, 'v') });
+      renderRi(points);
+      if (k < currents.length - 1) {
+        riStatus('Erholungspause …');
+        await sampleFor(pause);
+      }
+    }
+    riStatus(`Fertig (${new Date().toLocaleTimeString()}).`);
+  }, (e) => riStatus(`Abgebrochen: ${e.message}`));
+}
+$('btnRi').addEventListener('click', () => (state.busy === 'btnRi' ? runExclusive('btnRi') : runRi()));
+
+// ---------- Kurzschluss ----------
+async function runShort() {
+  const msg = (t) => { $('shortMsg').textContent = t; };
+  const dur = Number($('shortDur').value);
+  if (!inRange(dur, [0.5, 60])) {
+    msg('Die Dauer muss zwischen 0,5 und 60 s liegen.');
+    return;
+  }
+  if (!confirm(`Eingang für ${dur} s kurzschließen?\n\nNur bei kurzschlussfesten Quellen (z. B. Netzteil mit Strombegrenzung) – niemals an Akkus oder Batterien!`)) return;
+  $('shortResult').textContent = '';
+
+  await runExclusive('btnShort', async () => {
+    await load.setInput(false);
+    setInputUI(false);
+    await load.setShort();
+    const mode = await load.getMode();
+    setModeUI(mode);
+    if (mode !== 'SHORT') throw new Error(`Die Last ist nicht in den Kurzschluss-Modus gewechselt (Modus: ${mode}).`);
+    msg('Kurzschluss aktiv …');
+    await load.setInput(true);
+    setInputUI(true);
+    let samples;
+    try {
+      samples = await sampleFor(dur * 1000);
+    } finally {
+      await load.setInput(false);
+      setInputUI(false);
+    }
+    const tail = samples.slice(-3);
+    const iMax = Math.max(...samples.map((m) => m.i));
+    $('shortResult').innerHTML = `Kurzschlussstrom ${avg(tail, 'i').toFixed(3)} A` +
+      `<small>Restspannung ${avg(tail, 'v').toFixed(3)} V · Höchstwert ${iMax.toFixed(3)} A · ${samples.length} Messungen</small>`;
+    msg(`Fertig (${new Date().toLocaleTimeString()}).`);
+  }, (e) => msg(`Abgebrochen: ${e.message}`));
+}
+$('btnShort').addEventListener('click', () => (state.busy === 'btnShort' ? runExclusive('btnShort') : runShort()));
+
+// ---------- Speicher & System ----------
+const memMsg = (t) => { $('memMsg').textContent = t; };
+
+function memSlot() {
+  const n = Number($('memSlot').value);
+  check(Number.isInteger(n) && inRange(n, [1, 100]), 'Platz muss zwischen 1 und 100 liegen.');
+  return n;
+}
+
+$('btnMemSave').addEventListener('click', async () => {
+  try {
+    const n = memSlot();
+    await load.saveMemory(n);
+    memMsg(`Aktuelle Einstellung auf Platz ${n} gespeichert.`);
+  } catch (e) {
+    memMsg(e.message);
+  }
+});
+
+$('btnMemRecall').addEventListener('click', async () => {
+  try {
+    const n = memSlot();
+    if (state.inputOn) {
+      await load.setInput(false);
+      setInputUI(false);
+    }
+    await load.recallMemory(n);
+    const mode = await load.getMode();
+    setModeUI(mode);
+    $('curSet').textContent = 'abgerufen (Abfrage zeigt ggf. alten Wert)';
+    memMsg(`Platz ${n} abgerufen – Betriebsart ${MODES[mode]?.label ?? mode}.`);
+  } catch (e) {
+    memMsg(e.message);
+  }
+});
+
+async function readSystem() {
+  const st = await load.status();
+  $('sysBeep').checked = st.beep;
+  $('sysBaud').textContent = st.baud ? `${st.baud} Baud` : '—';
+  const lim = await load.limits();
+  const fmt = ([lo, hi], unit) => `${lo} … ${hi} ${unit}`;
+  $('limV').textContent = fmt(lim.V, 'V');
+  $('limI').textContent = fmt(lim.I, 'A');
+  $('limR').textContent = fmt(lim.R, 'Ω');
+  $('limP').textContent = fmt(lim.P, 'W');
+}
+
+$('sysBeep').addEventListener('change', async () => {
+  try {
+    await load.setBeep($('sysBeep').checked);
+    $('sysBeep').checked = await load.getBeep();
+  } catch (e) {
+    log('err', e.message);
+  }
+});
+$('btnSysRead').addEventListener('click', () => readSystem().catch((e) => log('err', e.message)));
+
 // ---------- Konsole ----------
 $('consoleForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -823,10 +1171,12 @@ if (!KEL103.supported()) {
   $('unsupported').hidden = false;
   $('btnConnect').disabled = true;
 }
-updateControls();
-setModeUI('CC');
+fillListForm({ range: 3, repeat: 1, steps: [{ current: 0.2, slope: 0.1, seconds: 1 }, { current: 0.6, slope: 0.1, seconds: 1 }] });
+loadListFromBrowser();
 updateDynFields();
-renderRi([]);
+setModeUI('CC');
+showTab(storageGet('kel103.tab') ?? 'dyn');
+updateControls();
 window.addEventListener('beforeunload', () => {
   // Best effort: Eingang beim Schließen der Seite ausschalten
   if (load.connected && $('offOnDisconnect').checked) load.setInput(false);

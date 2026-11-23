@@ -8,9 +8,13 @@ Kein Build-Schritt, keine Abhängigkeiten – reines HTML/CSS/JavaScript.
 
 - Verbinden über USB-Seriell (Baudrate wählbar, Standard 115200)
 - Live-Anzeige von Spannung, Strom und Leistung mit Verlaufsdiagramm (Zeitfenster, Fadenkreuz)
-- Dynamik-Funktionen: dynamisches CV/CC/CR/CW, Puls und Toggle mit Trigger
-- Entladetest über die interne Batterietest-Funktion der Last (Abschaltung im Gerät)
-- Innenwiderstandsmessung von Batterien mit mehreren Strompulsen
+- Sonderfunktionen in Reitern:
+  - Dynamik: dynamisches CV/CC/CR/CW, Puls und Toggle mit Trigger
+  - Sequenz: bis zu 84 Stromstufen mit Anstieg, Dauer und Wiederholungen (Plätze 1–7)
+  - Entladetest über die interne Batterietest-Funktion der Last (Abschaltung im Gerät)
+  - Innenwiderstandsmessung von Batterien mit mehreren Strompulsen
+  - Kurzschluss mit Zeitbegrenzung
+  - Speicherplätze 1–100, Summer, Gerätegrenzen
 - Eingang ein-/ausschalten
 - Betriebsart CC / CV / CR / CW wählen und Sollwert setzen
 - Aufzeichnung mit Energie- (Wh) und Ladungszähler (Ah), CSV-Export
@@ -30,7 +34,8 @@ python -m http.server 8000
 
 Dann <http://localhost:8000> öffnen, **Verbinden** klicken und den COM-Port der Last wählen.
 
-> Die Baudrate muss mit der Einstellung im Gerät übereinstimmen (Menü *System → Baudrate*).
+> Über USB spielt die Baudrate in der Regel keine Rolle. Bei RS232 muss sie mit der Einstellung
+> im Gerät übereinstimmen (am Gerät: Shift + 0).
 
 ## Verwendete Befehle
 
@@ -44,11 +49,25 @@ Dann <http://localhost:8000> öffnen, **Verbinden** klicken und den COM-Port der
 | Batterietest speichern | `:BATT 10,3A,0.5A,4.5V,10AH,600M` (Platz, Bereich, Strom, Schlussspannung, Kapazität, Zeit in min) |
 | Batterietest abrufen | `:RCL:BATT 10`, Parameter lesen mit `:RCL:BATT?` |
 | Batterietest Ergebnis | `:BATT:CAP?` → `0.0016AH`, `:BATT:TIM?` → `0.1891M` |
-
 | Dynamik CV/CR/CW | `:DYN 1,1V,2V,1HZ,40%` (`3` mit `OHM`, `4` mit `W`) |
 | Dynamik CC | `:DYN 2,0.1A/uS,0.1A/uS,0.2A,0.6A,1HZ,50%` (Anstieg 1, Anstieg 2, I1, I2, f, Tastgrad) |
 | Puls / Toggle | `:DYN 5,0.1A/uS,0.1A/uS,0.2A,0.6A,0.5S` / `:DYN 6,0.1A/uS,0.1A/uS,0.2A,0.6A`, auslösen mit `*TRG` |
 | Dynamik lesen | `:DYN?` (antwortet nur im Dynamik-Modus) |
+| Sequenz | `:LIST 7,3A,2,0.2A,0.1A/uS,1S,0.6A,0.1A/uS,1S,3` (Platz, Bereich, Anzahl, je Stufe I/Anstieg/Dauer, Durchläufe), `:RCL:LIST 7` |
+| Kurzschluss | `:FUNC SHOR` (nicht `SHORT`!), `:FUNC?` → `SHORt` |
+| Speicher | `*SAV 1`…`*SAV 100`, `*RCL n` |
+| System | `:SYST:BEEP ON\|OFF`, `:SYST:BEEP?`, `:STAT?` → `0,3,…` (Summer, RS232-Baudindex) |
+| Grenzen | `:VOLT:UPP?` `:VOLT:LOW?` (ebenso `CURR`, `RES`, `POW`) |
+
+### Einschränkungen der Firmware V3.21 (am Gerät geprüft)
+
+- `:RCL:LIST?` antwortet nie – die Website merkt sich gespeicherte Sequenzen deshalb im Browser.
+  Sequenzen bis 84 Stufen, ab 0,01 s je Stufe und bis 999 Durchläufe werden angenommen.
+- `:OCP …` / `:OPP …` werden nicht übernommen, auch nicht in der Form aus der Befehlsliste;
+  `:RCL:OCP n` lässt die Last kurz verstummen. OCP- und OPP-Test sind deshalb nicht eingebaut.
+- Nach `*RCL n` liefern `:CURR?` usw. teils noch den alten Sollwert, aktiv ist aber der abgerufene.
+- Nach dem Abruf eines leeren Speicherplatzes antwortet die Last kurz nicht.
+- Nur am Gerät: Remote Sense (Shift + CW), externe Triggerung (Shift + CR), Tastensperre, RS232-Baudrate.
 
 ### Dynamik (am Gerät geprüft)
 

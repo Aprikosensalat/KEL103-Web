@@ -92,132 +92,242 @@
       <label class="check"><input type="checkbox" id="offOnDisconnect" checked> Eingang beim Trennen ausschalten</label>
     </section>
 
-    <section class="card" id="dynCard">
-      <h2>Dynamik</h2>
-      <p class="muted small">
-        Die Last wechselt selbstständig zwischen zwei Werten (CV/CC/CR/CW mit Frequenz und Tastgrad)
-        oder schaltet per Trigger (Puls, Toggle). Der Tastgrad ist der Zeitanteil von Wert 2.
-        Die Last liefert nur etwa alle 200 ms einen neuen Messwert – schnellere Wechsel erscheinen
-        im Verlauf als Mittelwert.
-      </p>
-      <div class="row">
-        <label>Modus
-          <select id="dynMode"></select>
-        </label>
-        <label><span id="dynL1">Wert 1</span>
-          <input id="dynV1" type="number" min="0" step="0.001" value="0.2">
-        </label>
-        <label><span id="dynL2">Wert 2</span>
-          <input id="dynV2" type="number" min="0" step="0.001" value="0.6">
-        </label>
-        <label data-dyn="freq">Frequenz (Hz)
-          <input id="dynFreq" type="number" min="0.001" max="10000" step="0.001" value="1">
-        </label>
-        <label data-dyn="freq">Tastgrad Wert 2 (%)
-          <input id="dynDuty" type="number" min="1" max="99" step="1" value="50">
-        </label>
-        <label data-dyn="width">Pulsbreite (s)
-          <input id="dynWidth" type="number" min="0.001" max="100" step="0.001" value="0.5">
-        </label>
-        <label data-dyn="slopes">Anstieg 1 (A/µs)
-          <input id="dynS1" type="number" min="0.001" max="1" step="0.001" value="0.1">
-        </label>
-        <label data-dyn="slopes">Anstieg 2 (A/µs)
-          <input id="dynS2" type="number" min="0.001" max="1" step="0.001" value="0.1">
-        </label>
+    <section class="card tabs-card">
+      <div class="tabs" role="tablist" aria-label="Sonderfunktionen">
+        <button role="tab" data-tab="dyn">Dynamik</button>
+        <button role="tab" data-tab="list">Sequenz</button>
+        <button role="tab" data-tab="batt">Entladetest</button>
+        <button role="tab" data-tab="ri">Innenwiderstand</button>
+        <button role="tab" data-tab="short">Kurzschluss</button>
+        <button role="tab" data-tab="sys">Speicher &amp; System</button>
       </div>
-      <div class="row">
-        <button id="btnDynStart" class="primary" disabled>Übernehmen &amp; Eingang EIN</button>
-        <button id="btnDynApply" disabled>Nur übernehmen</button>
-        <button id="btnDynStop" disabled>Eingang AUS</button>
-        <button id="btnDynTrig" disabled>Trigger auslösen</button>
-        <button id="btnDynRead" disabled>Vom Gerät lesen</button>
-      </div>
-      <p id="dynMsg" class="muted small"></p>
-    </section>
 
-    <section class="card" id="battCard">
-      <div class="card-head">
-        <h2>Entladetest (interne Batterietest-Funktion)</h2>
-        <span id="battState" class="status off">bereit</span>
+      <!-- Dynamik -->
+      <div class="tab-panel" role="tabpanel" id="tab-dyn">
+        <p class="muted small">
+          Die Last wechselt selbstständig zwischen zwei Werten (CV/CC/CR/CW mit Frequenz und Tastgrad)
+          oder schaltet per Trigger (Puls, Toggle). Der Tastgrad ist der Zeitanteil von Wert 2.
+          Die Last liefert nur etwa alle 200 ms einen neuen Messwert – schnellere Wechsel erscheinen
+          im Verlauf als Mittelwert.
+        </p>
+        <div class="row">
+          <label>Modus
+            <select id="dynMode"></select>
+          </label>
+          <label><span id="dynL1">Wert 1</span>
+            <input id="dynV1" type="number" min="0" step="0.001" value="0.2">
+          </label>
+          <label><span id="dynL2">Wert 2</span>
+            <input id="dynV2" type="number" min="0" step="0.001" value="0.6">
+          </label>
+          <label data-dyn="freq">Frequenz (Hz)
+            <input id="dynFreq" type="number" min="0.001" max="10000" step="0.001" value="1">
+          </label>
+          <label data-dyn="freq">Tastgrad Wert 2 (%)
+            <input id="dynDuty" type="number" min="1" max="99" step="1" value="50">
+          </label>
+          <label data-dyn="width">Pulsbreite (s)
+            <input id="dynWidth" type="number" min="0.001" max="100" step="0.001" value="0.5">
+          </label>
+          <label data-dyn="slopes">Anstieg 1 (A/µs)
+            <input id="dynS1" type="number" min="0.001" max="1" step="0.001" value="0.1">
+          </label>
+          <label data-dyn="slopes">Anstieg 2 (A/µs)
+            <input id="dynS2" type="number" min="0.001" max="1" step="0.001" value="0.1">
+          </label>
+        </div>
+        <div class="row">
+          <button id="btnDynStart" class="primary" disabled>Übernehmen &amp; Eingang EIN</button>
+          <button id="btnDynApply" disabled>Nur übernehmen</button>
+          <button id="btnDynStop" disabled>Eingang AUS</button>
+          <button id="btnDynTrig" disabled>Trigger auslösen</button>
+          <button id="btnDynRead" disabled>Vom Gerät lesen</button>
+        </div>
+        <p id="dynMsg" class="muted small"></p>
       </div>
-      <p class="muted small">
-        Die Last entlädt mit Konstantstrom und schaltet selbst ab, sobald die Schlussspannung,
-        die Kapazitätsgrenze oder das Zeitlimit erreicht ist – auch wenn der Browser geschlossen wird
-        (dazu oben den Haken „Eingang beim Trennen ausschalten“ entfernen).
-        Beim Wiederverbinden wird ein laufender Test erkannt.
-      </p>
-      <div class="row">
-        <label>Speicherplatz
-          <select id="battSlot"></select>
-        </label>
-        <button id="btnBattLoad" disabled>Platz laden</button>
-      </div>
-      <div class="row">
-        <label>Entladestrom (A)
-          <input id="battCurrent" type="number" min="0.001" max="30" step="0.001" value="1">
-        </label>
-        <label>Schlussspannung (V)
-          <input id="battCutoff" type="number" min="0" max="120" step="0.01" value="3.0">
-        </label>
-        <label>Kapazitätsgrenze (Ah)
-          <input id="battCapacity" type="number" min="0.001" step="0.001" value="10">
-        </label>
-        <label>Zeitlimit (min)
-          <input id="battMinutes" type="number" min="0.1" step="0.1" value="600">
-        </label>
-      </div>
-      <div class="row">
-        <label class="check"><input type="checkbox" id="battClear" checked> Verlauf beim Start löschen</label>
-        <button id="btnBattStart" class="primary" disabled>Test starten</button>
-        <button id="btnBattStop" disabled>Test stoppen</button>
-      </div>
-      <p id="battMsg" class="muted small"></p>
-      <div class="stats">
-        <div><span class="label">Kapazität</span><span id="bCap" class="stat">—</span></div>
-        <div><span class="label">Energie</span><span id="bEnergy" class="stat">—</span></div>
-        <div><span class="label">Dauer</span><span id="bTime" class="stat">—</span></div>
-        <div><span class="label">Spannung Start / Ende</span><span id="bVolt" class="stat">—</span></div>
-        <div><span class="label">Mittlere Spannung</span><span id="bVavg" class="stat">—</span></div>
-      </div>
-    </section>
 
-    <section class="card" id="riCard">
-      <h2>Innenwiderstand</h2>
-      <p class="muted small">
-        Misst zuerst die Leerlaufspannung, belastet die Batterie dann nacheinander kurz mit den
-        angegebenen Strömen (Konstantstrom) und wertet den Spannungseinbruch aus.
-        Ri ergibt sich aus der Steigung der Ausgleichsgeraden durch alle Punkte (U über I).
-        Für genaue Werte die Batterie mit kurzen, dicken Leitungen anschließen –
-        der Widerstand der Messleitungen wird mitgemessen.
-      </p>
-      <div class="row">
-        <label>Prüfströme (A)
-          <input id="riCurrents" type="text" value="0,5; 1; 2" class="wide">
-        </label>
-        <label>Pulsdauer (s)
-          <input id="riPulse" type="number" min="0.5" step="0.5" value="2">
-        </label>
-        <label>Pause (s)
-          <input id="riPause" type="number" min="0.5" step="0.5" value="3">
-        </label>
-        <label>Abbruch unter (V)
-          <input id="riVmin" type="number" min="0" step="0.1" value="2.5">
-        </label>
-        <button id="btnRi" disabled>Messung starten</button>
-      </div>
-      <p id="riStatus" class="muted small"></p>
-      <div class="ri-grid">
-        <div>
-          <table id="riTable">
+      <!-- Sequenz -->
+      <div class="tab-panel" role="tabpanel" id="tab-list" hidden>
+        <div class="card-head">
+          <p class="muted small">
+            Die Last fährt bis zu 84 Stromstufen nacheinander ab (Konstantstrom), wiederholt den Ablauf
+            und schaltet danach selbst ab. Die Last kann gespeicherte Sequenzen nicht zurückmelden –
+            die Website merkt sich deshalb die zuletzt gespeicherte Sequenz je Platz im Browser.
+          </p>
+          <span id="listState" class="status off">bereit</span>
+        </div>
+        <div class="row">
+          <label>Speicherplatz
+            <select id="listSlot"></select>
+          </label>
+          <label>Strombereich
+            <select id="listRange">
+              <option value="3">3 A</option>
+              <option value="30">30 A</option>
+            </select>
+          </label>
+          <label>Durchläufe
+            <input id="listRepeat" type="number" min="1" max="999" step="1" value="1">
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table id="listTable" class="grid-table">
             <thead>
-              <tr><th>Soll</th><th>I gemessen</th><th>U</th><th>ΔU</th><th>Ri (Punkt)</th></tr>
+              <tr><th>#</th><th>Strom (A)</th><th>Anstieg (A/µs)</th><th>Dauer (s)</th><th></th></tr>
             </thead>
             <tbody></tbody>
           </table>
-          <p id="riResult" class="result"></p>
         </div>
-        <canvas id="riPlot"></canvas>
+        <div class="row">
+          <button id="btnListAdd">Stufe hinzufügen</button>
+          <span id="listInfo" class="muted small"></span>
+        </div>
+        <div class="row">
+          <button id="btnListStart" class="primary" disabled>Speichern &amp; Starten</button>
+          <button id="btnListSave" disabled>Nur speichern</button>
+          <button id="btnListStop" disabled>Stoppen</button>
+        </div>
+        <p id="listMsg" class="muted small"></p>
+      </div>
+
+      <!-- Entladetest -->
+      <div class="tab-panel" role="tabpanel" id="tab-batt" hidden>
+        <div class="card-head">
+          <p class="muted small">
+            Die Last entlädt mit Konstantstrom und schaltet selbst ab, sobald die Schlussspannung,
+            die Kapazitätsgrenze oder das Zeitlimit erreicht ist – auch wenn der Browser geschlossen wird
+            (dazu oben den Haken „Eingang beim Trennen ausschalten“ entfernen).
+            Beim Wiederverbinden wird ein laufender Test erkannt.
+          </p>
+          <span id="battState" class="status off">bereit</span>
+        </div>
+        <div class="row">
+          <label>Speicherplatz
+            <select id="battSlot"></select>
+          </label>
+          <button id="btnBattLoad" disabled>Platz laden</button>
+        </div>
+        <div class="row">
+          <label>Entladestrom (A)
+            <input id="battCurrent" type="number" min="0.001" max="30" step="0.001" value="1">
+          </label>
+          <label>Schlussspannung (V)
+            <input id="battCutoff" type="number" min="0" max="120" step="0.01" value="3.0">
+          </label>
+          <label>Kapazitätsgrenze (Ah)
+            <input id="battCapacity" type="number" min="0.001" step="0.001" value="10">
+          </label>
+          <label>Zeitlimit (min)
+            <input id="battMinutes" type="number" min="0.1" step="0.1" value="600">
+          </label>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="battClear" checked> Verlauf beim Start löschen</label>
+          <button id="btnBattStart" class="primary" disabled>Test starten</button>
+          <button id="btnBattStop" disabled>Test stoppen</button>
+        </div>
+        <p id="battMsg" class="muted small"></p>
+        <div class="stats">
+          <div><span class="label">Kapazität</span><span id="bCap" class="stat">—</span></div>
+          <div><span class="label">Energie</span><span id="bEnergy" class="stat">—</span></div>
+          <div><span class="label">Dauer</span><span id="bTime" class="stat">—</span></div>
+          <div><span class="label">Spannung Start / Ende</span><span id="bVolt" class="stat">—</span></div>
+          <div><span class="label">Mittlere Spannung</span><span id="bVavg" class="stat">—</span></div>
+        </div>
+      </div>
+
+      <!-- Innenwiderstand -->
+      <div class="tab-panel" role="tabpanel" id="tab-ri" hidden>
+        <p class="muted small">
+          Misst zuerst die Leerlaufspannung, belastet die Batterie dann nacheinander kurz mit den
+          angegebenen Strömen (Konstantstrom) und wertet den Spannungseinbruch aus.
+          Ri ergibt sich aus der Steigung der Ausgleichsgeraden durch alle Punkte (U über I).
+          Der Widerstand der Lastleitungen wird mitgemessen – für genaue Werte den Remote-Sense-Eingang
+          auf der Rückseite direkt an die Batteriepole anschließen und am Gerät mit Shift + CW aktivieren
+          (Sense-Leitungen nie ohne angeschlossene Lastleitungen verbinden).
+        </p>
+        <div class="row">
+          <label>Prüfströme (A)
+            <input id="riCurrents" type="text" value="0,5; 1; 2" class="wide">
+          </label>
+          <label>Pulsdauer (s)
+            <input id="riPulse" type="number" min="0.5" step="0.5" value="2">
+          </label>
+          <label>Pause (s)
+            <input id="riPause" type="number" min="0.5" step="0.5" value="3">
+          </label>
+          <label>Abbruch unter (V)
+            <input id="riVmin" type="number" min="0" step="0.1" value="2.5">
+          </label>
+          <button id="btnRi" class="primary" data-label="Messung starten" disabled>Messung starten</button>
+        </div>
+        <p id="riStatus" class="muted small"></p>
+        <div class="ri-grid">
+          <div>
+            <table id="riTable" class="grid-table">
+              <thead>
+                <tr><th>Soll</th><th>I gemessen</th><th>U</th><th>ΔU</th><th>Ri (Punkt)</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <p id="riResult" class="result"></p>
+          </div>
+          <canvas id="riPlot"></canvas>
+        </div>
+      </div>
+
+      <!-- Kurzschluss -->
+      <div class="tab-panel" role="tabpanel" id="tab-short" hidden>
+        <p class="muted small">
+          Schließt den Eingang für die eingestellte Dauer kurz (bis 30 A, begrenzt durch die Quelle)
+          und misst den Kurzschlussstrom – z. B. um die Strombegrenzung eines Netzteils zu prüfen.
+          <strong>Nur für kurzschlussfeste Quellen, niemals direkt an Akkus oder Batterien.</strong>
+        </p>
+        <div class="row">
+          <label>Dauer (s)
+            <input id="shortDur" type="number" min="0.5" max="60" step="0.5" value="2">
+          </label>
+          <button id="btnShort" class="primary" data-label="Kurzschluss starten" disabled>Kurzschluss starten</button>
+        </div>
+        <p id="shortMsg" class="muted small"></p>
+        <p id="shortResult" class="result"></p>
+      </div>
+
+      <!-- Speicher & System -->
+      <div class="tab-panel" role="tabpanel" id="tab-sys" hidden>
+        <h3>Speicherplätze 1–100</h3>
+        <p class="muted small">
+          Speichert bzw. ruft Betriebsart und Sollwert ab. Nach dem Abrufen zeigt die Firmware den
+          Sollwert bei einer Abfrage teils noch alt an – der abgerufene Wert ist trotzdem aktiv.
+        </p>
+        <div class="row">
+          <label>Platz
+            <input id="memSlot" type="number" min="1" max="100" step="1" value="1">
+          </label>
+          <button id="btnMemSave" disabled>Aktuelle Einstellung speichern</button>
+          <button id="btnMemRecall" disabled>Abrufen</button>
+        </div>
+        <p id="memMsg" class="muted small"></p>
+
+        <h3>System</h3>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="sysBeep" disabled> Tastenton (Summer)</label>
+          <button id="btnSysRead" disabled>Neu einlesen</button>
+        </div>
+        <table id="sysTable" class="grid-table narrow">
+          <tbody>
+            <tr><th>RS232-Baudrate</th><td id="sysBaud">—</td></tr>
+            <tr><th>Spannung</th><td id="limV">—</td></tr>
+            <tr><th>Strom</th><td id="limI">—</td></tr>
+            <tr><th>Widerstand</th><td id="limR">—</td></tr>
+            <tr><th>Leistung</th><td id="limP">—</td></tr>
+          </tbody>
+        </table>
+        <p class="muted small">
+          Nur am Gerät einstellbar: Remote Sense (Shift + CW, Anzeige „COMM“), externe Triggerung
+          (Shift + CR, „GRAP“), Tastensperre (Shift + Lock), RS232-Baudrate (Shift + 0).
+          Über USB spielt die Baudrate keine Rolle.
+        </p>
       </div>
     </section>
 

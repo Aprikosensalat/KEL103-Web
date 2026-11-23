@@ -203,6 +203,8 @@ export class KEL103 {
   async getMode() {
     const r = (await this.query(':FUNC?')).toUpperCase();
     if (r.startsWith('BATT')) return 'BATTERY';
+    if (r.startsWith('SHOR')) return 'SHORT';
+    if (r.startsWith('LIST')) return 'LIST';
     // Dynamik: "CONTINUOUS CC", "PULSE", "TOGGLE"
     if (r.startsWith('CONT') || r.startsWith('PULSE') || r.startsWith('TOGGLE')) return 'DYNAMIC';
     // Manche Firmwares antworten mit "CP" statt "CW"
@@ -259,6 +261,62 @@ export class KEL103 {
   /** Löst im Puls-/Toggle-Modus einmal aus. */
   trigger() {
     return this.write('*TRG');
+  }
+
+  // ---- Sequenz (:LIST) ----
+  // Am Gerät geprüft: ":LIST <platz>,<bereich>A,<anzahl>,<I>A,<anstieg>A/uS,<dauer>S,…,<durchläufe>"
+  // Platz 1–7, bis 84 Stufen, Dauer ab 0,01 s, bis 999 Durchläufe. Start mit :RCL:LIST n + :INP ON,
+  // danach schaltet die Last den Eingang selbst ab. :RCL:LIST? antwortet bei Firmware V3.21 nicht.
+
+  saveList(slot, { range, repeat, steps }) {
+    const f = (x) => Number(Number(x).toFixed(4));
+    const body = steps.map((s) => `${f(s.current)}A,${f(s.slope)}A/uS,${f(s.seconds)}S`).join(',');
+    return this.write(`:LIST ${slot},${range}A,${steps.length},${body},${repeat}`);
+  }
+
+  recallList(slot) {
+    return this.write(`:RCL:LIST ${slot}`);
+  }
+
+  // ---- Kurzschluss ----
+  // Achtung: Die Firmware versteht nur "SHOR" (":FUNC SHORT" wird ignoriert), :FUNC? -> "SHORt".
+  setShort() {
+    return this.write(':FUNC SHOR');
+  }
+
+  // ---- Speicher 1–100 ----
+  // *RCL stellt Betriebsart und Sollwert her; :CURR? usw. zeigen danach aber teils noch den alten Wert.
+  saveMemory(slot) {
+    return this.write(`*SAV ${slot}`);
+  }
+
+  recallMemory(slot) {
+    return this.write(`*RCL ${slot}`);
+  }
+
+  // ---- System ----
+  setBeep(on) {
+    return this.write(`:SYST:BEEP ${on ? 'ON' : 'OFF'}`);
+  }
+
+  async getBeep() {
+    return (await this.query(':SYST:BEEP?')).toUpperCase() === 'ON';
+  }
+
+  /** :STAT? -> "0,3,0,0,0,0": Summer, Baudraten-Index (RS232) */
+  async status() {
+    const parts = (await this.query(':STAT?')).split(',').map((s) => parseInt(s, 10));
+    const bauds = [9600, 19200, 38400, 57600, 115200];
+    return { beep: parts[0] === 1, baud: bauds[parts[1]] ?? null, raw: parts };
+  }
+
+  /** Gerätegrenzen über :VOLT:UPP? / :VOLT:LOW? usw. */
+  async limits() {
+    const out = {};
+    for (const [key, cmd] of [['V', ':VOLT'], ['I', ':CURR'], ['R', ':RES'], ['P', ':POW']]) {
+      out[key] = [await this.queryNumber(`${cmd}:LOW?`), await this.queryNumber(`${cmd}:UPP?`)];
+    }
+    return out;
   }
 
   // ---- Interner Batterietest ----
