@@ -72,7 +72,9 @@ Dann <http://localhost:8000> öffnen, **Verbinden** klicken und den COM-Port der
 
 ### Einschränkungen der Firmware V3.21 (am Gerät geprüft)
 
-- `:RCL:LIST?` antwortet nie – die Website merkt sich gespeicherte Sequenzen deshalb im Browser.
+- `:RCL:LIST?` antwortet nie, auch nicht nach `:FUNC LIST` – die Website merkt sich gespeicherte
+  Sequenzen deshalb im Browser. `:RCL:LIST n` schaltet von selbst in den Modus `LIST`; `:FUNC LIST`
+  wird ignoriert und ist nicht nötig. Es gibt nur die Plätze 1–7 (8–10 werden nicht angenommen).
   Sequenzen bis 84 Stufen, ab 0,01 s je Stufe und bis 999 Durchläufe werden angenommen.
 - `:OCP …` / `:OPP …` werden nicht übernommen, auch nicht in der Form aus der Befehlsliste;
   `:RCL:OCP n` lässt die Last kurz verstummen. OCP- und OPP-Test sind deshalb nicht eingebaut.
