@@ -158,6 +158,18 @@ input.wide { width: 160px; }
 }
 h3 { font-size: 0.95rem; margin: 6px 0 6px; }
 
+.flags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.status.warn { background: #d97706; }
+.hint {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 4px solid #d97706;
+  background: color-mix(in srgb, #d97706 12%, transparent);
+  font-size: 0.85rem;
+}
+.hint.ok { border-left-color: var(--on); background: color-mix(in srgb, var(--on) 12%, transparent); }
+
 /* Messdateien */
 .table-wrap.files { max-height: 380px; overflow-y: auto; }
 .files-table th, .files-table td { text-align: left; vertical-align: middle; }

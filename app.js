@@ -22,6 +22,8 @@ const state = {
   abort: false,
   batt: null, // interner Batterietest
   list: null, // laufende Sequenz
+  flags: null, // letzter :STAT?-Stand (Remote Sense, Trigger, Tastensperre)
+  flagCycle: 0,
 };
 const battRunning = () => state.batt?.running === true;
 const listRunning = () => state.list?.running === true;
@@ -112,10 +114,13 @@ function updateControls() {
   $('btnListSave').disabled = !free;
   $('btnListStop').disabled = !connected || !listRunning();
 
-  for (const id of ['btnMemSave', 'btnMemRecall', 'sysBeep', 'btnSysRead']) $(id).disabled = !free;
+  for (const id of ['btnMemSave', 'btnMemRecall', 'sysBeep', 'sysLock', 'sysSenseCb', 'btnSysRead']) $(id).disabled = !free;
 
   if (!connected) {
     $('idn').textContent = '—';
+    $('devFlags').hidden = true;
+    $('riSense').hidden = true;
+    state.flags = null;
     setInputUI(false);
   }
   markRunningTabs();
@@ -323,6 +328,8 @@ async function poll() {
         setInputUI(await load.getInput());
       }
     }
+    // Remote Sense / Triggerung / Tastensperre gelegentlich nachlesen (am Gerät umschaltbar)
+    if (state.flagCycle++ % 10 === 9) await refreshFlags();
   } catch (e) {
     if (load.connected) log('err', e.message);
   }
@@ -904,6 +911,7 @@ async function startBattery() {
     }
     setModeUI('BATTERY');
     if ($('battClear').checked) $('btnClear').click();
+    const sense = await senseParam();
 
     state.batt = {
       running: true, params: p, ocv, external: false, stopRequested: false,
@@ -917,6 +925,7 @@ async function startBattery() {
         Kapazitätsgrenze: `${p.capacity} Ah`,
         Zeitlimit: `${p.minutes} min`,
         Leerlaufspannung: `${ocv.toFixed(4)} V`,
+        'Remote Sense': sense,
       },
       extraCols: BATT_COLS,
     });
@@ -1120,12 +1129,14 @@ async function runRi() {
   renderRi(points);
 
   await runExclusive('btnRi', async () => {
+    const sense = await senseParam();
     rec.start('ri', `Innenwiderstand – ${currents.join(' / ')} A`, {
       params: {
         Prüfströme: `${currents.join(' / ')} A`,
         Pulsdauer: `${pulse / 1000} s`,
         Pause: `${pause / 1000} s`,
         Abbruchgrenze: `${vmin} V`,
+        'Remote Sense': sense,
       },
     });
     riStatus('Leerlaufspannung wird gemessen …');
@@ -1254,10 +1265,53 @@ $('btnMemRecall').addEventListener('click', async () => {
   }
 });
 
+function setFlag(id, on, onText, offText, onCls = 'on') {
+  $(id).textContent = on ? onText : offText;
+  $(id).className = `status ${on ? onCls : 'off'}`;
+}
+
+function renderFlags(st) {
+  state.flags = st;
+  $('devFlags').hidden = false;
+  setFlag('flagSense', st.sense, 'Remote Sense an', 'Remote Sense aus');
+  setFlag('flagTrig', st.extTrigger, 'Ext. Trigger an', 'Ext. Trigger aus');
+  setFlag('flagLock', st.lock, 'Tasten gesperrt', 'Tasten frei', 'warn');
+  $('sysSense').textContent = st.sense ? 'an (Spannung wird an den Sense-Klemmen gemessen)' : 'aus';
+  $('sysTrig').textContent = st.extTrigger ? 'an' : 'aus';
+  $('sysBeep').checked = st.beep;
+  $('sysLock').checked = st.lock;
+  $('sysSenseCb').checked = st.sense;
+  $('sysBaud').textContent = st.baud ? `${st.baud} Baud` : '—';
+  const hint = $('riSense');
+  hint.hidden = false;
+  hint.className = st.sense ? 'hint ok' : 'hint';
+  hint.textContent = st.sense
+    ? 'Remote Sense ist an – die Spannung wird direkt an den Sense-Klemmen gemessen, Leitungswiderstände fallen heraus.'
+    : 'Remote Sense ist aus – der Widerstand von Lastleitungen und Klemmen wird mitgemessen. Für genaue Werte Sense-Leitungen anschließen und Remote Sense im Reiter „Speicher & System“ einschalten.';
+}
+
+async function refreshFlags() {
+  try {
+    renderFlags(await load.status());
+  } catch (e) {
+    log('err', `Status nicht lesbar: ${e.message}`);
+  }
+}
+
+/** Sense-Zustand für Messdateien (frisch abgefragt). */
+async function senseParam() {
+  try {
+    const st = await load.status();
+    renderFlags(st);
+    return st.sense ? 'an' : 'aus (Leitungswiderstand wird mitgemessen)';
+  } catch {
+    return 'unbekannt';
+  }
+}
+
 async function readSystem() {
   const st = await load.status();
-  $('sysBeep').checked = st.beep;
-  $('sysBaud').textContent = st.baud ? `${st.baud} Baud` : '—';
+  renderFlags(st);
   const lim = await load.limits();
   const fmt = ([lo, hi], unit) => `${lo} … ${hi} ${unit}`;
   $('limV').textContent = fmt(lim.V, 'V');
@@ -1270,6 +1324,35 @@ $('sysBeep').addEventListener('change', async () => {
   try {
     await load.setBeep($('sysBeep').checked);
     $('sysBeep').checked = await load.getBeep();
+  } catch (e) {
+    log('err', e.message);
+  }
+});
+$('sysLock').addEventListener('change', async () => {
+  try {
+    await load.setLock($('sysLock').checked);
+    $('sysLock').checked = await load.getLock();
+    await refreshFlags();
+  } catch (e) {
+    log('err', e.message);
+  }
+});
+$('sysSenseCb').addEventListener('change', async () => {
+  const want = $('sysSenseCb').checked;
+  try {
+    if (state.inputOn) {
+      alert('Remote Sense bitte nur bei ausgeschaltetem Eingang umschalten.');
+      $('sysSenseCb').checked = !want;
+      return;
+    }
+    if (want && !confirm('Remote Sense einschalten?\n\nNur wenn Lastleitungen UND Sense-Leitungen angeschlossen sind (Plus an Plus, Minus an Minus). Sense-Leitungen nie ohne Lastleitungen verbinden.')) {
+      $('sysSenseCb').checked = false;
+      return;
+    }
+    await load.setSense(want);
+    $('sysSenseCb').checked = await load.getSense();
+    rec.event(`Remote Sense ${$('sysSenseCb').checked ? 'an' : 'aus'}`);
+    await refreshFlags();
   } catch (e) {
     log('err', e.message);
   }

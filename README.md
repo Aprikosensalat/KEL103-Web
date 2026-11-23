@@ -65,7 +65,9 @@ Dann <http://localhost:8000> öffnen, **Verbinden** klicken und den COM-Port der
 | Sequenz | `:LIST 7,3A,2,0.2A,0.1A/uS,1S,0.6A,0.1A/uS,1S,3` (Platz, Bereich, Anzahl, je Stufe I/Anstieg/Dauer, Durchläufe), `:RCL:LIST 7` |
 | Kurzschluss | `:FUNC SHOR` (nicht `SHORT`!), `:FUNC?` → `SHORt` |
 | Speicher | `*SAV 1`…`*SAV 100`, `*RCL n` |
-| System | `:SYST:BEEP ON\|OFF`, `:SYST:BEEP?`, `:STAT?` → `0,3,…` (Summer, RS232-Baudindex) |
+| System | `:SYST:BEEP ON\|OFF`, `:SYST:BEEP?`, `:SYST:LOCK ON\|OFF`, `:SYST:LOCK?` (Tastensperre) |
+| Remote Sense | `:SYST:COMP ON\|OFF`, `:SYST:COMP?` (entspricht Shift + CW, „COMM“) |
+| Status | `:STAT?` → `0,3,0,0,1,0`: Summer · RS232-Baudindex · Tastensperre · ext. Triggerung · Remote Sense · ? |
 | Grenzen | `:VOLT:UPP?` `:VOLT:LOW?` (ebenso `CURR`, `RES`, `POW`) |
 
 ### Einschränkungen der Firmware V3.21 (am Gerät geprüft)
@@ -76,7 +78,17 @@ Dann <http://localhost:8000> öffnen, **Verbinden** klicken und den COM-Port der
   `:RCL:OCP n` lässt die Last kurz verstummen. OCP- und OPP-Test sind deshalb nicht eingebaut.
 - Nach `*RCL n` liefern `:CURR?` usw. teils noch den alten Sollwert, aktiv ist aber der abgerufene.
 - Nach dem Abruf eines leeren Speicherplatzes antwortet die Last kurz nicht.
-- Nur am Gerät: Remote Sense (Shift + CW), externe Triggerung (Shift + CR), Tastensperre, RS232-Baudrate.
+- Nur am Gerät umschaltbar: externe Triggerung (Shift + CR) und RS232-Baudrate (Shift + 0).
+  Die Triggerung lässt sich über `:STAT?` abfragen. Remote Sense ist per `:SYST:COMP` schaltbar;
+  die Website zeigt den Zustand an und vermerkt ihn in den Messdateien von Innenwiderstand und Entladetest.
+
+### Remote Sense
+
+Mit Sense-Leitungen misst die Last die Spannung direkt am Prüfling; der Spannungsabfall auf den
+Lastleitungen fällt heraus (wichtig für die Innenwiderstandsmessung). Reihenfolge: zuerst Lastleitungen,
+dann Sense-Leitungen (Plus an Plus) direkt an die Pole, dann Remote Sense einschalten (Website oder
+Shift + CW, „COMM“). Abbauen umgekehrt.
+Laut Anleitung die Sense-Leitungen nie ohne angeschlossene Lastleitungen verbinden.
 
 ### Dynamik (am Gerät geprüft)
 

@@ -303,11 +303,39 @@ export class KEL103 {
     return (await this.query(':SYST:BEEP?')).toUpperCase() === 'ON';
   }
 
-  /** :STAT? -> "0,3,0,0,0,0": Summer, Baudraten-Index (RS232) */
+  /**
+   * :STAT? -> "0,3,0,0,0,0" (am Gerät durch Umschalten ermittelt, Firmware V3.21):
+   * 1 Summer · 2 RS232-Baudindex · 3 Tastensperre · 4 externe Triggerung · 5 Remote Sense · 6 unbekannt
+   */
   async status() {
     const parts = (await this.query(':STAT?')).split(',').map((s) => parseInt(s, 10));
     const bauds = [9600, 19200, 38400, 57600, 115200];
-    return { beep: parts[0] === 1, baud: bauds[parts[1]] ?? null, raw: parts };
+    return {
+      beep: parts[0] === 1,
+      baud: bauds[parts[1]] ?? null,
+      lock: parts[2] === 1,
+      extTrigger: parts[3] === 1,
+      sense: parts[4] === 1,
+      raw: parts,
+    };
+  }
+
+  /** Remote Sense (Fernkompensation): am Gerät geprüft, entspricht Shift + CW („COMM“). */
+  setSense(on) {
+    return this.write(`:SYST:COMP ${on ? 'ON' : 'OFF'}`);
+  }
+
+  async getSense() {
+    return (await this.query(':SYST:COMP?')).toUpperCase() === 'ON';
+  }
+
+  /** Tastensperre am Gerät (bei Sperre sind nur On/Off und Shift bedienbar). */
+  setLock(on) {
+    return this.write(`:SYST:LOCK ${on ? 'ON' : 'OFF'}`);
+  }
+
+  async getLock() {
+    return (await this.query(':SYST:LOCK?')).toUpperCase() === 'ON';
   }
 
   /** Gerätegrenzen über :VOLT:UPP? / :VOLT:LOW? usw. */

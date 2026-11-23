@@ -34,6 +34,11 @@
     <section class="card" id="idnCard">
       <h2>Gerät</h2>
       <p id="idn" class="muted">—</p>
+      <div class="flags" id="devFlags" hidden>
+        <span class="status off" id="flagSense" title="Remote Sense (am Gerät: Shift + CW)">Remote Sense aus</span>
+        <span class="status off" id="flagTrig" title="Externe Triggerung (am Gerät: Shift + CR)">Ext. Trigger aus</span>
+        <span class="status off" id="flagLock" title="Tastensperre">Tasten frei</span>
+      </div>
     </section>
 
     <section class="meters">
@@ -261,6 +266,7 @@
           </label>
           <button id="btnRi" class="primary" data-label="Messung starten" disabled>Messung starten</button>
         </div>
+        <p id="riSense" class="hint" hidden></p>
         <p id="riStatus" class="muted small"></p>
         <div class="ri-grid">
           <div>
@@ -312,10 +318,14 @@
         <h3>System</h3>
         <div class="row">
           <label class="check"><input type="checkbox" id="sysBeep" disabled> Tastenton (Summer)</label>
+          <label class="check"><input type="checkbox" id="sysLock" disabled> Tastensperre am Gerät</label>
+          <label class="check"><input type="checkbox" id="sysSenseCb" disabled> Remote Sense</label>
           <button id="btnSysRead" disabled>Neu einlesen</button>
         </div>
         <table id="sysTable" class="grid-table narrow">
           <tbody>
+            <tr><th>Remote Sense</th><td id="sysSense">—</td></tr>
+            <tr><th>Externe Triggerung</th><td id="sysTrig">—</td></tr>
             <tr><th>RS232-Baudrate</th><td id="sysBaud">—</td></tr>
             <tr><th>Spannung</th><td id="limV">—</td></tr>
             <tr><th>Strom</th><td id="limI">—</td></tr>
@@ -324,9 +334,12 @@
           </tbody>
         </table>
         <p class="muted small">
-          Nur am Gerät einstellbar: Remote Sense (Shift + CW, Anzeige „COMM“), externe Triggerung
-          (Shift + CR, „GRAP“), Tastensperre (Shift + Lock), RS232-Baudrate (Shift + 0).
-          Über USB spielt die Baudrate keine Rolle.
+          Remote Sense (am Gerät Shift + CW, Anzeige „COMM“) nur mit angeschlossenen Lastleitungen und
+          Sense-Leitungen einschalten; umschalten geht nur bei ausgeschaltetem Eingang.
+          Die externe Triggerung lässt sich nur am Gerät umschalten (Shift + CR, „GRAP“).
+          Die RS232-Baudrate wird mit Shift + 0 eingestellt; über USB spielt sie keine Rolle.
+          Bei gesperrten Tasten sind am Gerät nur noch On/Off und Shift bedienbar; entsperren geht
+          hier oder am Gerät mit Shift + Lock.
         </p>
       </div>
     </section>
