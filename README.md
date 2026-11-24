@@ -23,6 +23,9 @@ Kein Build-Schritt, keine Abhängigkeiten – reines HTML/CSS/JavaScript.
   „Sollwert 0.4 A“); beim Entladetest zusätzlich `kapazitaet_mAh` und `testzeit_min`.
   Die Dateien liegen im Browser (IndexedDB, alle 5 s gesichert) und lassen sich einzeln als CSV
   oder gesammelt als ZIP herunterladen.
+- **Messdatei-Betrachter** („Ansehen“): gespeicherte Dateien als Diagramm mit Zoom (Mausrad, Bereich
+  aufziehen, Tasten + / −), Verschieben (Umschalt + Ziehen oder rechte Maustaste) und zwei Messcursorn A/B;
+  die Tabelle zeigt Werte an A und B, Differenz, Min/Max/Mittel sowie Ladung, Energie und |ΔU/ΔI| dazwischen
 - CSV wahlweise für deutsches Excel (`;`, Dezimalkomma, Ortszeit) oder international (`,`, Dezimalpunkt)
 - Konsole für beliebige SCPI-Befehle
 - Optional: Eingang beim Trennen automatisch ausschalten
@@ -119,5 +122,6 @@ jedem Befehl 50 ms Pause.
 - `app.js` – UI-Logik, Messschleife, Entladetest, Innenwiderstand, CSV-Export
 - `plot.js` – Diagramme (Zeitverlauf, U-I-Kennlinie) ohne externe Bibliothek
 - `runs.js` – Messdateien: Speicherung (IndexedDB), CSV- und ZIP-Erzeugung ohne externe Bibliothek
+- `viewer.js` – Betrachter für Messdateien (Zoom, Verschieben, Cursor A/B); identisch in KWR103-Web
 
 Hersteller-PDFs im Ordner sind per `.gitignore` vom Repository ausgeschlossen.
