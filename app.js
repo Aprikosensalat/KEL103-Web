@@ -190,7 +190,7 @@ $('listSlot').value = '7';
 // ---------- Verbindung ----------
 async function connect() {
   try {
-    await load.connect(Number($('baud').value));
+    await load.connect(Number($('baud').value), { usb: $('transport').value === 'usb' });
   } catch (e) {
     if (e.name !== 'NotFoundError') log('err', `Verbinden fehlgeschlagen: ${e.message}`);
     return;
@@ -1540,6 +1540,16 @@ $('consoleForm').addEventListener('submit', async (e) => {
 if (!KEL103.supported()) {
   $('unsupported').hidden = false;
   $('btnConnect').disabled = true;
+}
+// Schnittstelle: Web Serial am Desktop, WebUSB unter Android (dort kann Web Serial nur Bluetooth)
+{
+  const hasSerial = 'serial' in navigator, hasUsb = 'usb' in navigator;
+  const android = /Android/i.test(navigator.userAgent);
+  for (const opt of $('transport').options) opt.hidden = opt.value === 'usb' ? !hasUsb : !hasSerial;
+  const saved = storageGet('kel103.transport');
+  $('transport').value = (saved === 'usb' && hasUsb) || (saved === 'serial' && hasSerial) ? saved
+    : (android || !hasSerial) && hasUsb ? 'usb' : 'serial';
+  $('transport').addEventListener('change', () => storageSet('kel103.transport', $('transport').value));
 }
 fillListForm({ range: 3, repeat: 1, steps: [{ current: 0.2, slope: 0.1, seconds: 1 }, { current: 0.6, slope: 0.1, seconds: 1 }] });
 loadListFromBrowser();

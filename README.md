@@ -6,7 +6,7 @@ Kein Build-Schritt, keine Abhängigkeiten – reines HTML/CSS/JavaScript.
 
 ## Funktionen
 
-- Verbinden über USB-Seriell (Baudrate wählbar, Standard 115200)
+- Verbinden über USB-Seriell (Baudrate wählbar, Standard 115200), unter Android über WebUSB
 - Live-Anzeige von Spannung, Strom und Leistung mit Verlaufsdiagramm (Zeitfenster, Fadenkreuz)
 - Sonderfunktionen in Reitern:
   - Dynamik: dynamisches CV/CC/CR/CW, Puls und Toggle mit Trigger
@@ -34,6 +34,12 @@ Kein Build-Schritt, keine Abhängigkeiten – reines HTML/CSS/JavaScript.
 
 **Online:** <https://aprikosensalat.github.io/KEL103-Web/> in Chrome oder Edge öffnen,
 **Verbinden** klicken und den COM-Port der Last wählen. Die Messdateien bleiben dabei lokal im Browser.
+
+**Android:** Chrome unter Android kann mit Web Serial nur Bluetooth-Geräte öffnen. Für das USB-Kabel
+(OTG-Adapter) unter **Schnittstelle** „USB direkt (WebUSB, Android)“ wählen – unter Android ist das
+voreingestellt. Die Website spricht dann das USB-CDC-Protokoll selbst (`usbserial.js`, KEL103 und KWR103
+melden sich als VID 0x0416 / PID 0x5011). Unter Windows hält der COM-Port-Treiber das Gerät, dort weiter
+„Seriell“ verwenden.
 
 **Lokal:** Web Serial gibt es nur in **Chrome / Edge (Desktop)** und nur in sicherem Kontext
 (`https://` oder `http://localhost`). Ein Doppelklick auf `index.html` (`file://`) reicht
@@ -122,6 +128,7 @@ jedem Befehl 50 ms Pause.
 - `app.js` – UI-Logik, Messschleife, Entladetest, Innenwiderstand, CSV-Export
 - `plot.js` – Diagramme (Zeitverlauf, U-I-Kennlinie) ohne externe Bibliothek
 - `runs.js` – Messdateien: Speicherung (IndexedDB), CSV- und ZIP-Erzeugung ohne externe Bibliothek
+- `usbserial.js` – serielle Verbindung über WebUSB (USB-CDC) für Android; identisch in KWR103-Web
 - `viewer.js` – Betrachter für Messdateien (Zoom, Verschieben, Cursor A/B); identisch in KWR103-Web
 
 Hersteller-PDFs im Ordner sind per `.gitignore` vom Repository ausgeschlossen.
