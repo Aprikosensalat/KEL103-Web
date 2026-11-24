@@ -75,7 +75,7 @@ for (const b of tabButtons) b.addEventListener('click', () => showTab(b.dataset.
 // ---------- Geräteauswahl ----------
 // „kel103“ nutzt den Originaltreiber mit allen Sonderfunktionen, alle anderen Lasten aus der
 // Geräte-Registry laufen über GenericLoad (Grundfunktionen, Betriebsarten des Geräts, ggf. Remote Sense).
-const NATIVE = { id: 'kel103', name: 'KORAD KEL103', baudRates: [9600, 19200, 38400, 57600, 115200], defaultBaud: 115200, usbCdc: true };
+const NATIVE = { id: 'kel103', name: 'KORAD KEL103', baudRates: [9600, 19200, 38400, 57600, 115200], defaultBaud: 115200, webUsb: true };
 const deviceList = [NATIVE, ...registry.list('sink').filter((i) => i.id !== 'kel103')];
 const deviceInfo = () => deviceList.find((d) => d.id === $('devModel').value) ?? NATIVE;
 const isNative = () => load instanceof KEL103;
@@ -120,7 +120,7 @@ function selectDevice() {
   baud.value = storageGet(`kel103.baud.${info.id}`) ?? info.defaultBaud;
   $('baudWrap').hidden = !!info.sim || !baud.options.length;
   $('transWrap').hidden = !!info.sim;
-  const usbOk = 'usb' in navigator && info.usbCdc;
+  const usbOk = 'usb' in navigator && info.webUsb;
   for (const o of $('transport').options) if (o.value === 'usb') o.hidden = !usbOk;
   if ($('transport').value === 'usb' && !usbOk) $('transport').value = 'serial';
   const note = [info.note, info.senseHint].filter(Boolean).join(' ');

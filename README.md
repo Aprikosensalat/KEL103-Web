@@ -44,9 +44,10 @@ Speicher bleiben der KEL103 vorbehalten. Die IT8514C+ ist nach Handbuch umgesetz
 
 **Android:** Chrome unter Android kann mit Web Serial nur Bluetooth-Geräte öffnen. Für das USB-Kabel
 (OTG-Adapter) unter **Schnittstelle** „USB direkt (WebUSB, Android)“ wählen – unter Android ist das
-voreingestellt. Die Website spricht dann das USB-CDC-Protokoll selbst (`usbserial.js`, KEL103 und KWR103
-melden sich als VID 0x0416 / PID 0x5011). Unter Windows hält der COM-Port-Treiber das Gerät, dort weiter
-„Seriell“ verwenden.
+voreingestellt. Die Website spricht dann das USB-Protokoll des Seriell-Chips selbst (`usbserial.js`):
+USB-CDC (KORAD, VID 0x0416 / PID 0x5011 – am Gerät geprüft), Prolific PL2303 (ITECH IT8514C+) und FTDI
+(R&S HMP mit HO720/HO730) – die beiden letzten nach den Linux-Treibern umgesetzt, nicht an Hardware geprüft.
+Unter Windows hält der COM-Port-Treiber das Gerät, dort weiter „Seriell“ verwenden.
 
 **Lokal:** Web Serial gibt es nur in **Chrome / Edge (Desktop)** und nur in sicherem Kontext
 (`https://` oder `http://localhost`). Ein Doppelklick auf `index.html` (`file://`) reicht
@@ -135,7 +136,7 @@ jedem Befehl 50 ms Pause.
 - `app.js` – UI-Logik, Messschleife, Entladetest, Innenwiderstand, CSV-Export
 - `plot.js` – Diagramme (Zeitverlauf, U-I-Kennlinie) ohne externe Bibliothek
 - `runs.js` – Messdateien: Speicherung (IndexedDB), CSV- und ZIP-Erzeugung ohne externe Bibliothek
-- `usbserial.js` – serielle Verbindung über WebUSB (USB-CDC) für Android; identisch in KWR103-Web
+- `usbserial.js` – serielle Verbindung über WebUSB (CDC, PL2303, FTDI) für Android; identisch in KWR103-Web
 - `viewer.js` – Betrachter für Messdateien (Zoom, Verschieben, Cursor A/B); identisch in KWR103-Web
 
 Hersteller-PDFs im Ordner sind per `.gitignore` vom Repository ausgeschlossen.
