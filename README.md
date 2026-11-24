@@ -30,6 +30,13 @@ Kein Build-Schritt, keine Abhängigkeiten – reines HTML/CSS/JavaScript.
 - Konsole für beliebige SCPI-Befehle
 - Optional: Eingang beim Trennen automatisch ausschalten
 
+## Andere Lasten
+
+Über **Gerät** lässt sich auch die ITECH IT8514C+ (und ein Simulator) aus der gemeinsamen Geräteschicht
+(`devices/`, wie in *Effizienzmessung-Web*) steuern: Betriebsarten CC/CV/CR/CW, Sollwert, Eingang, Messung,
+Verlauf, Messdateien, Konsole und Remote Sense. Dynamik, Sequenz, Entladetest, Innenwiderstand, Kurzschluss und
+Speicher bleiben der KEL103 vorbehalten. Die IT8514C+ ist nach Handbuch umgesetzt, nicht an der Hardware geprüft.
+
 ## Starten
 
 **Online:** <https://aprikosensalat.github.io/KEL103-Web/> in Chrome oder Edge öffnen,

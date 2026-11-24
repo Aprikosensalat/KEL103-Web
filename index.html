@@ -11,20 +11,20 @@
   <header>
     <h1>KEL103 Steuerung</h1>
     <div class="conn">
-      <label>Schnittstelle
+      <label>Gerät
+        <select id="devModel"></select>
+      </label>
+      <label id="devChWrap" hidden>Kanal
+        <select id="devChannel"></select>
+      </label>
+      <label id="transWrap">Schnittstelle
         <select id="transport">
           <option value="serial">Seriell (Web Serial)</option>
           <option value="usb">USB direkt (WebUSB, Android)</option>
         </select>
       </label>
-      <label>Baudrate
-        <select id="baud">
-          <option>9600</option>
-          <option>19200</option>
-          <option>38400</option>
-          <option>57600</option>
-          <option selected>115200</option>
-        </select>
+      <label id="baudWrap">Baudrate
+        <select id="baud"></select>
       </label>
       <button id="btnConnect" class="primary">Verbinden</button>
       <span id="status" class="status off">getrennt</span>
@@ -40,10 +40,11 @@
     <section class="card" id="idnCard">
       <h2>Gerät</h2>
       <p id="idn" class="muted">—</p>
+      <p id="devNote" class="muted small" hidden></p>
       <div class="flags" id="devFlags" hidden>
-        <span class="status off" id="flagSense" title="Remote Sense (am Gerät: Shift + CW)">Remote Sense aus</span>
-        <span class="status off" id="flagTrig" title="Externe Triggerung (am Gerät: Shift + CR)">Ext. Trigger aus</span>
-        <span class="status off" id="flagLock" title="Tastensperre">Tasten frei</span>
+        <span class="status off" data-cap="sense" id="flagSense" title="Remote Sense (am Gerät: Shift + CW)">Remote Sense aus</span>
+        <span class="status off" data-cap="special" id="flagTrig" title="Externe Triggerung (am Gerät: Shift + CR)">Ext. Trigger aus</span>
+        <span class="status off" data-cap="special" id="flagLock" title="Tastensperre">Tasten frei</span>
       </div>
     </section>
 
@@ -103,14 +104,14 @@
       <label class="check"><input type="checkbox" id="offOnDisconnect" checked> Eingang beim Trennen ausschalten</label>
     </section>
 
-    <section class="card tabs-card">
+    <section class="card tabs-card" id="tabsCard">
       <div class="tabs" role="tablist" aria-label="Sonderfunktionen">
-        <button role="tab" data-tab="dyn">Dynamik</button>
-        <button role="tab" data-tab="list">Sequenz</button>
-        <button role="tab" data-tab="batt">Entladetest</button>
-        <button role="tab" data-tab="ri">Innenwiderstand</button>
-        <button role="tab" data-tab="short">Kurzschluss</button>
-        <button role="tab" data-tab="sys">Speicher &amp; System</button>
+        <button role="tab" data-tab="dyn" data-cap="special">Dynamik</button>
+        <button role="tab" data-tab="list" data-cap="special">Sequenz</button>
+        <button role="tab" data-tab="batt" data-cap="special">Entladetest</button>
+        <button role="tab" data-tab="ri" data-cap="special">Innenwiderstand</button>
+        <button role="tab" data-tab="short" data-cap="special">Kurzschluss</button>
+        <button role="tab" data-tab="sys" data-cap="sense">Speicher &amp; System</button>
       </div>
 
       <!-- Dynamik -->
@@ -307,6 +308,7 @@
 
       <!-- Speicher & System -->
       <div class="tab-panel" role="tabpanel" id="tab-sys" hidden>
+        <div data-cap="special">
         <h3>Speicherplätze 1–100</h3>
         <p class="muted small">
           Speichert bzw. ruft Betriebsart und Sollwert ab. Nach dem Abrufen zeigt die Firmware den
@@ -320,15 +322,16 @@
           <button id="btnMemRecall" disabled>Abrufen</button>
         </div>
         <p id="memMsg" class="muted small"></p>
+        </div>
 
         <h3>System</h3>
         <div class="row">
-          <label class="check"><input type="checkbox" id="sysBeep" disabled> Tastenton (Summer)</label>
-          <label class="check"><input type="checkbox" id="sysLock" disabled> Tastensperre am Gerät</label>
+          <label class="check" data-cap="special"><input type="checkbox" id="sysBeep" disabled> Tastenton (Summer)</label>
+          <label class="check" data-cap="special"><input type="checkbox" id="sysLock" disabled> Tastensperre am Gerät</label>
           <label class="check"><input type="checkbox" id="sysSenseCb" disabled> Remote Sense</label>
-          <button id="btnSysRead" disabled>Neu einlesen</button>
+          <button id="btnSysRead" data-cap="special" disabled>Neu einlesen</button>
         </div>
-        <table id="sysTable" class="grid-table narrow">
+        <table id="sysTable" class="grid-table narrow" data-cap="special">
           <tbody>
             <tr><th>Remote Sense</th><td id="sysSense">—</td></tr>
             <tr><th>Externe Triggerung</th><td id="sysTrig">—</td></tr>
@@ -339,7 +342,12 @@
             <tr><th>Leistung</th><td id="limP">—</td></tr>
           </tbody>
         </table>
-        <p class="muted small">
+        <p class="muted small" data-cap="generic">
+          Remote Sense nur mit angeschlossenen Lastleitungen und Sense-Leitungen einschalten; umschalten nur bei
+          ausgeschaltetem Eingang. Weitere Sonderfunktionen (Dynamik, Sequenz, Entladetest, Innenwiderstand,
+          Kurzschluss, Speicher) gibt es nur bei der KEL103.
+        </p>
+        <p class="muted small" data-cap="special">
           Remote Sense (am Gerät Shift + CW, Anzeige „COMM“) nur mit angeschlossenen Lastleitungen und
           Sense-Leitungen einschalten; umschalten geht nur bei ausgeschaltetem Eingang.
           Die externe Triggerung lässt sich nur am Gerät umschalten (Shift + CR, „GRAP“).

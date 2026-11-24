@@ -1,10 +1,12 @@
 import { KEL103, MODES, DYN_MODES, DYN_LIMITS } from './kel103.js';
+import { registry } from './devices/index.js';
+import { GenericLoad } from './devices/adapters.js';
 import { TimePlot, drawXY } from './plot.js';
 import { RunStore, Recorder, runToCsv, fileName, makeZip } from './runs.js';
 import { LogViewer } from './viewer.js';
 
 const $ = (id) => document.getElementById(id);
-const load = new KEL103();
+let load = null; // aktiver Treiber: KEL103 mit allen Funktionen oder eine andere Last über GenericLoad
 const store = new RunStore();
 const storeOpened = store.open(); // sofort öffnen; Schreibzugriffe warten darauf
 const rec = new Recorder(store, () => scheduleFilesRefresh());
@@ -50,11 +52,11 @@ function log(kind, text) {
   while (logEl.childElementCount > 500) logEl.firstChild.remove();
   logEl.scrollTop = logEl.scrollHeight;
 }
-load.onLog = (kind, text) => {
+function onLoadLog(kind, text) {
   // Routineabfragen nicht ins Log schreiben, sonst läuft es voll
-  if (kind !== 'err' && /^:MEAS:|^:BATT:(CAP|TIM)\?|^-?[\d.]+(V|A|W|AH|M)$|^:INP\?$|^(ON|OFF)$/.test(text)) return;
+  if (kind !== 'err' && /^:?MEAS:|^:BATT:(CAP|TIM)\?|^-?[\d.]+(V|A|W|AH|M)?$|^:?INP\?$|^(ON|OFF|[01])$|^SYST:SENS\?$/.test(text)) return;
   log(kind, text);
-};
+}
 
 // ---------- Reiter ----------
 const tabButtons = [...document.querySelectorAll('[data-tab]')];
@@ -69,6 +71,68 @@ function showTab(name) {
   if (name === 'ri') renderRi(state.riPoints ?? []); // Canvas braucht sichtbare Breite
 }
 for (const b of tabButtons) b.addEventListener('click', () => showTab(b.dataset.tab));
+
+// ---------- Geräteauswahl ----------
+// „kel103“ nutzt den Originaltreiber mit allen Sonderfunktionen, alle anderen Lasten aus der
+// Geräte-Registry laufen über GenericLoad (Grundfunktionen, Betriebsarten des Geräts, ggf. Remote Sense).
+const NATIVE = { id: 'kel103', name: 'KORAD KEL103', baudRates: [9600, 19200, 38400, 57600, 115200], defaultBaud: 115200, usbCdc: true };
+const deviceList = [NATIVE, ...registry.list('sink').filter((i) => i.id !== 'kel103')];
+const deviceInfo = () => deviceList.find((d) => d.id === $('devModel').value) ?? NATIVE;
+const isNative = () => load instanceof KEL103;
+let caps = {};
+
+for (const d of deviceList) $('devModel').add(new Option(d.id === 'kel103' ? `${d.name} (alle Funktionen)` : d.name, d.id));
+$('devModel').value = deviceList.some((d) => d.id === storageGet('kel103.device')) ? storageGet('kel103.device') : 'kel103';
+
+/** Blendet Bedienelemente aus, die das gewählte Gerät nicht kann. */
+function applyCaps() {
+  caps = isNative()
+    ? { special: true, sense: true, generic: false }
+    : { special: false, sense: load.senseControl, generic: true };
+  for (const el of document.querySelectorAll('[data-cap]')) el.hidden = !caps[el.dataset.cap];
+  const visibleTabs = tabButtons.filter((b) => !b.hidden);
+  $('tabsCard').hidden = !visibleTabs.length;
+  if (visibleTabs.length) {
+    const saved = storageGet('kel103.tab');
+    showTab(visibleTabs.some((b) => b.dataset.tab === saved) ? saved : visibleTabs[0].dataset.tab);
+  }
+  // Betriebsarten: nur die des Geräts anbieten
+  const modes = isNative() ? Object.keys(MODES) : load.modes;
+  for (const o of $('mode').options) {
+    if (MODES[o.value]) { o.hidden = !modes.includes(o.value); o.disabled = o.hidden; }
+    else o.hidden = !isNative();
+  }
+  document.querySelector('h1').textContent = `${deviceInfo().name.replace(/^(KORAD|ITECH) /, '')} Steuerung`;
+  document.title = document.querySelector('h1').textContent;
+}
+
+/** Treiber für die Auswahl anlegen (nur im getrennten Zustand). */
+function selectDevice() {
+  const info = deviceInfo();
+  storageSet('kel103.device', info.id);
+  const ch = $('devChannel');
+  ch.innerHTML = '';
+  (info.channels ?? [{}]).forEach((c, k) => ch.add(new Option(String(k + 1), k + 1)));
+  $('devChWrap').hidden = ch.options.length < 2;
+  const baud = $('baud');
+  baud.innerHTML = '';
+  for (const b of info.baudRates ?? []) baud.add(new Option(b, b));
+  baud.value = storageGet(`kel103.baud.${info.id}`) ?? info.defaultBaud;
+  $('baudWrap').hidden = !!info.sim || !baud.options.length;
+  $('transWrap').hidden = !!info.sim;
+  const usbOk = 'usb' in navigator && info.usbCdc;
+  for (const o of $('transport').options) if (o.value === 'usb') o.hidden = !usbOk;
+  if ($('transport').value === 'usb' && !usbOk) $('transport').value = 'serial';
+  const note = [info.note, info.senseHint].filter(Boolean).join(' ');
+  $('devNote').textContent = note;
+  $('devNote').hidden = !note;
+
+  load = info.id === 'kel103' ? new KEL103() : new GenericLoad(info.id, { channel: Number(ch.value) || 1 });
+  load.onLog = onLoadLog;
+  load.onDisconnect = onLoadDisconnect;
+  applyCaps();
+  setModeUI(state.mode && (isNative() || load.modes.includes(state.mode)) ? state.mode : 'CC');
+}
 
 const TEST_TABS = { btnRi: 'ri', btnShort: 'short' };
 function markRunningTabs() {
@@ -86,6 +150,7 @@ function updateControls() {
   const anyTest = !!state.busy || battRunning() || listRunning();
   const free = connected && !anyTest;
   $('btnConnect').textContent = connected ? 'Trennen' : 'Verbinden';
+  for (const id of ['devModel', 'devChannel', 'transport', 'baud']) $(id).disabled = connected;
   $('status').textContent = connected ? 'verbunden' : 'getrennt';
   $('status').classList.toggle('on', connected);
 
@@ -133,7 +198,7 @@ function setInputUI(on) {
   if (!on && rec.run?.endOnInputOff) rec.end('Eingang aus');
   // Eingang ohne laufenden Test eingeschaltet (Knopf oder am Gerät) -> eigene Datei „Manuell“
   if (on && !was && !rec.active && !state.busy && !battRunning() && !listRunning() && load.connected) {
-    rec.start('manual', `Manuell – ${modeText()}`, { endOnInputOff: true, params: { Betriebsart: modeText() } });
+    rec.start('manual', `Manuell – ${modeText()}`, { endOnInputOff: true, params: { Geraet: deviceInfo().name, Betriebsart: modeText() } });
   }
   const btn = $('btnInput');
   btn.textContent = on ? 'Eingang AUS' : 'Eingang EIN';
@@ -164,7 +229,7 @@ function setModeUI(mode) {
   }
   $('mode').value = mode;
   $('unit').textContent = m.unit;
-  $('setpoint').max = m.max;
+  $('setpoint').max = isNative() ? m.max : load.modeMax(mode);
   $('setpoint').step = m.step;
   markRunningTabs();
 }
@@ -232,7 +297,7 @@ async function disconnect() {
   await load.disconnect();
 }
 
-load.onDisconnect = () => {
+function onLoadDisconnect() {
   stopPoll();
   const kept = $('offOnDisconnect').checked
     ? 'der Eingang wurde ausgeschaltet.'
@@ -250,9 +315,12 @@ load.onDisconnect = () => {
   rec.end('Verbindung getrennt');
   updateControls();
   log('info', 'Port geschlossen');
-};
+}
 
 $('btnConnect').addEventListener('click', () => (load.connected ? disconnect() : connect()));
+$('devModel').addEventListener('change', selectDevice);
+$('devChannel').addEventListener('change', selectDevice);
+$('baud').addEventListener('change', () => storageSet(`kel103.baud.${deviceInfo().id}`, $('baud').value));
 
 // ---------- Grundsteuerung ----------
 $('btnInput').addEventListener('click', async () => {
@@ -1537,10 +1605,7 @@ $('consoleForm').addEventListener('submit', async (e) => {
 });
 
 // ---------- Start ----------
-if (!KEL103.supported()) {
-  $('unsupported').hidden = false;
-  $('btnConnect').disabled = true;
-}
+if (!KEL103.supported()) $('unsupported').hidden = false; // der Simulator funktioniert trotzdem
 // Schnittstelle: Web Serial am Desktop, WebUSB unter Android (dort kann Web Serial nur Bluetooth)
 {
   const hasSerial = 'serial' in navigator, hasUsb = 'usb' in navigator;
@@ -1554,8 +1619,7 @@ if (!KEL103.supported()) {
 fillListForm({ range: 3, repeat: 1, steps: [{ current: 0.2, slope: 0.1, seconds: 1 }, { current: 0.6, slope: 0.1, seconds: 1 }] });
 loadListFromBrowser();
 updateDynFields();
-setModeUI('CC');
-showTab(storageGet('kel103.tab') ?? 'dyn');
+selectDevice();
 updateControls();
 storeOpened.then(() => {
   navigator.storage?.persist?.().catch(() => {}); // Browser bitten, die Messdateien nicht automatisch zu löschen
